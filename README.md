@@ -79,7 +79,7 @@ The repository is structured as follows:
 Please install `[uv](https://docs.astral.sh/uv/getting-started/installation/)` and then run:
 
 ```bash
-make sync
+make install
 ```
 
 ## Data preparation

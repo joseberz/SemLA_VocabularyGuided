@@ -5,10 +5,9 @@ PROJECT_NAME=semla
 venv:
 	uv venv --seed --python 3.10
 
-# Install without build isolation so that Detectron can use torch installed in previous step
-sync: venv 
+# Install Detectron2 after syncing to avoid build isolation issues
+install: venv 
 	uv sync
-	# Add detectron after installing Torch because it is required
 	uv pip install --no-build-isolation https://github.com/facebookresearch/detectron2.git
 
 clean:

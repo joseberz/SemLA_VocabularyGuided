@@ -1,17 +1,14 @@
 PROJECT_NAME=semla
 
-.PHONY: init add-build-dependencies sync clean
+.PHONY: venv sync clean
 
 venv:
 	uv venv --seed --python 3.10
 
-# First instal torch because it is used as a build dependency in Detectron
-add-build-dependencies:
-	uv pip install torch torchvision
-
-# Install without build isolation so that Detectron can use torch installed in previous step
-sync: venv add-build-dependencies 
+# Install Detectron2 after syncing to avoid build isolation issues
+install: venv 
 	uv sync
+	uv pip install --no-build-isolation https://github.com/facebookresearch/detectron2.git
 
 clean:
 	rm -rf .venv uv.lock

@@ -1,0 +1,13 @@
+_BASE_: ../base.yaml
+MODEL:
+  SEM_SEG_HEAD:
+    TRAIN_CLASS_JSON: "datasets/cs19.json"
+    TEST_CLASS_JSON: "datasets/cs19.json"
+    NUM_CLASSES: 19
+DATASETS:
+  TRAIN: ("bdd_sem_seg_train",)
+  TEST: ("bdd_sem_seg_val",)
+INPUT:
+  MIN_SIZE_TEST: 0
+  MAX_SIZE_TRAIN: 1280
+  MAX_SIZE_TEST: 1280

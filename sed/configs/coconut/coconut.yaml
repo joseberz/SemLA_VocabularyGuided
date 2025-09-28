@@ -1,0 +1,9 @@
+_BASE_: ../base.yaml
+MODEL:
+  SEM_SEG_HEAD:
+    NUM_CLASSES: 133
+    TRAIN_CLASS_JSON: "datasets/coconut.json"
+    TEST_CLASS_JSON: "datasets/coconut.json"
+DATASETS:
+  TRAIN: ("openvocab_coco_2017_train_panoptic_with_sem_seg",)
+  TEST: ("openvocab_coco_2017_val_panoptic_with_sem_seg",)

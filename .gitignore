@@ -340,5 +340,8 @@ wandb/
 catseg/loradb/
 catseg/output/
 catseg/models/
+sed/loradb/
+sed/models/
+sed/output/
 results/
 output/

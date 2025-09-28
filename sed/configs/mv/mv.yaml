@@ -1,0 +1,14 @@
+_BASE_: ../base.yaml
+MODEL:
+  SEM_SEG_HEAD:
+    TRAIN_CLASS_JSON: "datasets/mv65.json"
+    TEST_CLASS_JSON: "datasets/mv65.json"
+    NUM_CLASSES: 65
+    IGNORE_VALUE: 65
+DATASETS:
+  TRAIN: ("mv_sem_seg_train",)
+  TEST: ("mv_sem_seg_val",)
+INPUT:
+  MIN_SIZE_TEST: 0
+  MAX_SIZE_TRAIN: 3984
+  MAX_SIZE_TEST: 3984

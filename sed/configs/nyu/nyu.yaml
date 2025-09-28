@@ -1,0 +1,13 @@
+_BASE_: ../base.yaml
+MODEL:
+  SEM_SEG_HEAD:
+    NUM_CLASSES: 40
+    TRAIN_CLASS_JSON: "datasets/nyu40.json"
+    TEST_CLASS_JSON: "datasets/nyu40.json"
+DATASETS:
+  TRAIN: ("nyu_sem_seg_train",)
+  TEST: ("nyu_sem_seg_val",)
+INPUT:
+  MIN_SIZE_TEST: 0
+  MAX_SIZE_TRAIN: 625
+  MAX_SIZE_TEST: 625

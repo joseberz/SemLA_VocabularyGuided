@@ -1,0 +1,10 @@
+scipy
+ftfy
+opencv-python
+setuptools
+pillow
+imageio
+timm
+regex
+einops
+git+https://github.com/facebookresearch/detectron2.git

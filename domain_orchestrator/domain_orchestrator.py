@@ -1,34 +1,30 @@
 import time
-from typing import Union, Dict, Callable
-from typing import Any, Literal, Mapping
-from pathlib import Path
 from argparse import Namespace
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable, Dict, Literal, Mapping, Union
+
 import logging
-import os
 
 import numpy as np
 import numpy.typing as npt
 
 import torch
 from torch import nn
-import torch.nn.functional as F
 
 import peft
 
 from .embedding import EmbeddingManager
+from .model_adapters.protocol import ModelAdapter
 
 logging.disable()
 
 torch.set_float32_matmul_precision("high")
 
-from .utils import custom_domain_args, get_domain_args, benchmark_catseg, load_catseg_model
-
 
 def softmax(x: list[float], softmax_temperature) -> np.ndarray:
     """Compute softmax values for each sets of scores in x."""
-    
-    # Add error handling for division by zero
+
     if softmax_temperature == 0:
         softmax_temperature = 1e-6
     exp_x = np.exp(np.divide(x, softmax_temperature))
@@ -38,6 +34,7 @@ def softmax(x: list[float], softmax_temperature) -> np.ndarray:
 @dataclass
 class Domain:
     """A simple Domain class with a name attribute."""
+
     name: str
     args: Namespace
     train_dataset_path: Path
@@ -66,11 +63,11 @@ class DomainObserver:
         self.domain_prototypes.update({domain.name: average_embedding})
 
     def calculate_similarity_to_domains(
-        self, 
-        embedding: npt.NDArray, 
+        self,
+        embedding: npt.NDArray,
         domains: list[Domain],
         similarity_measure: Callable[[npt.NDArray, npt.NDArray], np.float64],
-        sort_descending: bool = True
+        sort_descending: bool = True,
     ) -> Dict[str, float]:
         """
         Calculate the similarity between the target embedding and the domain prototypes.
@@ -82,8 +79,9 @@ class DomainObserver:
             similarity = similarity_measure(embedding, prot)
             similarities.append([domain.name, similarity])
 
-        # sort similarities from lowest to highest
-        similarities_dict = dict(sorted(similarities, key=lambda x: x[1], reverse=sort_descending))
+        similarities_dict = dict(
+            sorted(similarities, key=lambda x: x[1], reverse=sort_descending)
+        )
         return similarities_dict
 
 
@@ -93,26 +91,10 @@ class DomainOrchestrator:
         domains: list[str],
         lora_db_path: Union[str, Path] = "loradb/",
         embedding_manager: EmbeddingManager = EmbeddingManager(),
+        model_adapter: ModelAdapter | None = None,
     ) -> None:
-        
-        # TODO: Currently, to use catseg for experiments, we need to change the directory to the catseg directory
-        # This can be fixed by refactoring the catseg repo
-        parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        catseg_path = os.path.join(parent_dir, "catseg") # TODO: This is a hardcoded path, it should be a parameter
-        
-        print(f"Changing directory to '{catseg_path}' ...")
-
-        try:
-            os.chdir(catseg_path)
-        except FileNotFoundError:
-            print(f"Error: The specified path '{catseg_path}' does not exist.")
-            exit(1)
-        except PermissionError:
-            print(f"Error: Insufficient permissions to access '{catseg_path}'.")
-            exit(1)
-        except Exception as e:
-            print(f"Unexpected error while changing directory: {e}")
-            exit(1)
+        self.model_adapter = model_adapter or self._default_adapter()
+        self.model_adapter.setup()
 
         self.lora_db_path: Path = Path(lora_db_path)
 
@@ -123,7 +105,7 @@ class DomainOrchestrator:
         self.observer: DomainObserver = DomainObserver()
 
         print("Adding source domains ...")
-        
+
         self._source_domains: Mapping[str, Domain] = self._add_domains(
             domains, split="train"
         )
@@ -137,12 +119,17 @@ class DomainOrchestrator:
 
         self._setup_observer()
 
+    @staticmethod
+    def _default_adapter() -> ModelAdapter:
+        from .model_adapters.catseg_adapter import CatSegAdapter
+
+        return CatSegAdapter()
 
     def _benchmark_on_current_target_domain(self, name: str, target_domain: Domain) -> Any:
         print(
             f"Benchmarking {name} on the domain {target_domain.name} ...\n"
         )
-        res = benchmark_catseg(self.current_model, target_domain.args)
+        res = self.model_adapter.benchmark(self.current_model, target_domain.args)
         return res
 
     def _set_current_target_domain(
@@ -152,13 +139,10 @@ class DomainOrchestrator:
         """
         Set the current target domain to the specified domain.
         """
-        # We need to load all adapters each time the target domain changes because the same
-        # config can't be used across datasets and PEFT does not allow us to change the base
-        # model and keep the loaded adapters
 
         print(f"Setting current target domain to {target_domain.name}.\n")
 
-        self.current_model = None  # This will ensure that the current PEFT model will be initialized using base model with new config
+        self.current_model = None
         self._load_adapters(target_domain)
 
     def _load_adapters(self, target_domain: Domain) -> None:
@@ -177,10 +161,10 @@ class DomainOrchestrator:
         Load the LoRA adapter for the specified domain.
         """
         if self.current_model is None:
-            # Wrap the model in PeftModel class the first time an adapter is loaded
-            # The base model should be loaded with target domain config to avoid label space mismatch
             self.current_model = peft.PeftModel.from_pretrained(
-                load_catseg_model(target_domain.args), lora_path, source_domain.name
+                self.model_adapter.load_base_model(target_domain.args),
+                lora_path,
+                source_domain.name,
             )
         else:
             self.current_model.load_adapter(lora_path, source_domain.name)
@@ -197,42 +181,54 @@ class DomainOrchestrator:
         source_domains = {}
 
         for source_domain_name in source_domain_names:
-            args, evaluator, data_loader = get_domain_args(source_domain_name, split=split)
+            resources = self.model_adapter.get_domain_resources(
+                source_domain_name, split=split
+            )
             source_domains.update(
                 {
                     source_domain_name: self._add_domain(
                         domain_name=source_domain_name,
-                        args=args,
-                        evaluator=evaluator,
-                        data_loader=data_loader,
+                        args=resources.args,
+                        evaluator=resources.evaluator,
+                        data_loader=resources.data_loader,
+                        train_dataset_path=resources.train_dataset_path,
                     )
                 }
             )
 
         return source_domains
 
-
     def _add_domain(
         self,
         domain_name: str,
         args: Namespace,
-        evaluator = None,
-        data_loader = None,
+        evaluator=None,
+        data_loader=None,
         lora_path: Union[str, Path, None] = None,
+        train_dataset_path: Path | None = None,
     ) -> Domain:
         """Adds a Domain instance to the domains list."""
 
-        if evaluator and data_loader:
-            train_dataset_path = Path(args.train_dataset_path)
-            assert train_dataset_path.exists(), train_dataset_path
-        else:
-            train_dataset_path = None
+        if train_dataset_path is None:
+            if hasattr(args, "train_dataset_path"):
+                train_dataset_path = Path(args.train_dataset_path)
+            else:
+                raise ValueError(
+                    "Training dataset path is required to initialise Domain objects."
+                )
 
-        if lora_path is None:
-            lora_path = self.lora_db_path / domain_name
+        if evaluator and data_loader:
+            assert train_dataset_path.exists(), train_dataset_path
+
+        if not train_dataset_path.exists():
+            raise FileNotFoundError(
+                f"Path to training dataset '{train_dataset_path}' does not exist!"
+            )
+
+        resolved_lora_path = self._resolve_lora_path(domain_name, lora_path)
 
         statistics: Dict[str, npt.NDArray] = self.embedding_manager.calculate_statistics(
-            domain_name, lora_path, train_dataset_path,
+            domain_name, resolved_lora_path, train_dataset_path
         )
 
         train_average_embedding: npt.NDArray = statistics[
@@ -243,14 +239,23 @@ class DomainOrchestrator:
             domain_name,
             args,
             train_dataset_path=train_dataset_path,
-            lora_path=lora_path,
+            lora_path=resolved_lora_path,
             train_average_embedding=train_average_embedding,
             evaluator=evaluator,
             data_loader=data_loader,
         )
 
         return domain
-    
+
+    def _resolve_lora_path(
+        self,
+        domain_name: str,
+        lora_path: Union[str, Path, None],
+    ) -> Path:
+        if lora_path is None:
+            return self.lora_db_path / domain_name
+        return Path(lora_path)
+
     def _batch_merge(
         self,
         target_domains: list[str],
@@ -265,9 +270,8 @@ class DomainOrchestrator:
         weights = {}
 
         for current_target_domain_name in target_domains:
-
             current_target_domain = self._target_domains[current_target_domain_name]
-            
+
             self._set_current_target_domain(
                 current_target_domain,
             )
@@ -276,14 +280,15 @@ class DomainOrchestrator:
                 current_target_domain,
                 remove_target_adapter,
                 mode,
-                top_k=len(self._source_domains) - 1 if remove_target_adapter else len(self._source_domains)
+                top_k=len(self._source_domains) - 1
+                if remove_target_adapter
+                else len(self._source_domains),
             )
 
             weights.update({current_target_domain.name: weight_dict})
 
             result_dict = self._benchmark_on_current_target_domain(
-                name=merged_adpater_name,
-                target_domain=current_target_domain
+                name=merged_adpater_name, target_domain=current_target_domain
             )
 
             print(result_dict)
@@ -293,17 +298,15 @@ class DomainOrchestrator:
             results.update(
                 {
                     current_target_domain.name: result
-                }  # Different datasets have different evaluation methods so this won't always work
+                }
             )
 
-            # Delete the adapter so we can add another with the same name but different weights (remove unused adapters)
             print(f"Deleting adapter {merged_adpater_name}.")
             self.current_model.delete_adapter(merged_adpater_name)
 
             print("\n")
 
         return results, weights
-
 
     def _merge(
         self,
@@ -312,55 +315,51 @@ class DomainOrchestrator:
         mode: Literal["uniform", "centroid"],
         target_embedding=None,
         softmax_temperature: int | None = 0.05,
-        top_k: int = 5,  # number of domains to merge
+        top_k: int = 5,
         combination_type: str = "cat",
         similarity_measure: Callable[
             [npt.NDArray, npt.NDArray], np.float64
         ] = lambda v1, v2: np.linalg.norm(v1 - v2),
-        sort_descending: bool = True
-
+        sort_descending: bool = True,
     ) -> tuple[dict[str, float], str]:
         """
         Merge the source domains and benchmark the merged adapter on the target domain.
         """
-    
-        source_domains = None
+
         if remove_target_adapter:
             print(f"Removing {target_domain.name} from source domains!")
             source_domains = [
                 domain
-                for _, domain in self._source_domains.items() if domain.name != target_domain.name
+                for domain in self._source_domains.values()
+                if domain.name != target_domain.name
             ]
         else:
-            source_domains = [
-                domain
-                for _, domain in self._source_domains.items()
-            ]
+            source_domains = [domain for domain in self._source_domains.values()]
 
         if mode == "uniform":
-
             weights = [1 / len(source_domains) for _ in range(len(source_domains))]
-            domain_weight_mapping = {domain.name: weight for domain, weight in zip(source_domains, weights)}
+            domain_weight_mapping = {
+                domain.name: weight for domain, weight in zip(source_domains, weights)
+            }
 
             merged_name = ""
             for n, w in domain_weight_mapping.items():
-                merged_name += f"_{n}_{str(w).replace('.','_')}"
-            merged_name += f"_{combination_type}_{target_domain.name}" # Create a unique name for merged adapter so that it does not override existing adapters
+                merged_name += f"_{n}_{str(w).replace('.', '_')}"
+            merged_name += f"_{combination_type}_{target_domain.name}"
 
             self._merge_adapters(
                 merge_domains=[domain.name for domain in source_domains],
                 weights=weights,
                 merged_name=merged_name,
-                combination_type=combination_type
+                combination_type=combination_type,
             )
 
         elif mode == "centroid":
-
             similarity_mapping = self.observer.calculate_similarity_to_domains(
                 embedding=target_embedding,
-                domains=source_domains,  
+                domains=source_domains,
                 similarity_measure=similarity_measure,
-                sort_descending=sort_descending
+                sort_descending=sort_descending,
             )
 
             k_closest_names = list(similarity_mapping.keys())[: top_k]
@@ -371,7 +370,9 @@ class DomainOrchestrator:
                 print(f"{n}: {d}", end=", ")
             print("")
 
-            weights = self._calculate_adapter_weights(k_closest_similarities, softmax_temperature)
+            weights = self._calculate_adapter_weights(
+                k_closest_similarities, softmax_temperature
+            )
 
             domain_weight_mapping = {
                 k_closest_name: weight
@@ -380,14 +381,14 @@ class DomainOrchestrator:
 
             merged_name = ""
             for n, w in domain_weight_mapping.items():
-                merged_name += f"_{n}_{str(w).replace('.','_')}"
-            merged_name += f"_{combination_type}_{target_domain.name}" # Create a unique name for merged adapter so that it does not override existing adapters
+                merged_name += f"_{n}_{str(w).replace('.', '_')}"
+            merged_name += f"_{combination_type}_{target_domain.name}"
 
             self._merge_adapters(
                 merge_domains=k_closest_names,
                 weights=weights,
                 merged_name=merged_name,
-                combination_type=combination_type
+                combination_type=combination_type,
             )
 
         print(f"Setting {merged_name} as the active adapter.\n")
@@ -405,8 +406,8 @@ class DomainOrchestrator:
         """
         Merge the specified adapters with the specified weights.
         """
-        
-        print(f"Merging domains with weights:")
+
+        print("Merging domains with weights:")
         for n, w in zip(merge_domains, weights):
             print(f"{n}: {w}", end=", ")
         print("")
@@ -418,7 +419,7 @@ class DomainOrchestrator:
             combination_type=combination_type,
         )
 
-    def _calculate_adapter_weights(self, similarities:list[float], temperature: float) -> list[float]:
+    def _calculate_adapter_weights(self, similarities: list[float], temperature: float) -> list[float]:
         """
         Calculate the weights for the merged adapter based on the similarities to the source domains.
         """
@@ -438,25 +439,26 @@ class DomainOrchestrator:
             res = result_dict["sem_seg"].get("mIoU")
         return res
 
-
     def benchmark_zeroshot(self, target_domains: list[str]) -> dict[str, float]:
         results = {}
 
         for current_target_domain_name in target_domains:
             current_target_domain = self._target_domains[current_target_domain_name]
 
-            args: Namespace = custom_domain_args(
+            args: Namespace = self.model_adapter.build_eval_args(
                 config_file=current_target_domain.args.config_file,
                 output_path="output/benchmark_zeroshot/",
                 num_gpus=1,
                 model_path="models/model_final.pth",
             )
 
-            self.current_model = load_catseg_model(
+            self.current_model = self.model_adapter.load_base_model(
                 args, model_path=args.model_path
             )
 
-            result_dict = self._benchmark_on_current_target_domain(name="zeroshot", target_domain=current_target_domain)
+            result_dict = self._benchmark_on_current_target_domain(
+                name="zeroshot", target_domain=current_target_domain
+            )
 
             print(f"Zeroshot results for {current_target_domain.name}:")
             print(result_dict)
@@ -466,16 +468,15 @@ class DomainOrchestrator:
             results.update(
                 {
                     current_target_domain.name: result
-                }  # res can look different from dataset to dataset
+                }
             )
 
         return results
-    
+
     def benchmark_oracle(self, target_domains: list[str]) -> dict[str, float]:
         results = {}
 
         for current_target_domain_name in target_domains:
-            
             current_target_domain = self._target_domains[current_target_domain_name]
 
             self._set_current_target_domain(
@@ -485,8 +486,7 @@ class DomainOrchestrator:
             self.current_model.set_adapter(current_target_domain.name)
 
             result_dict = self._benchmark_on_current_target_domain(
-                name=current_target_domain.name,
-                target_domain=current_target_domain
+                name=current_target_domain.name, target_domain=current_target_domain
             )
             print(result_dict)
 
@@ -522,14 +522,13 @@ class DomainOrchestrator:
         target_domains: list[str],
         remove_target_adapter: bool = False,
         softmax_temperature: int | None = 0.05,
-        top_k: int = 5,  # number of domains to merge
+        top_k: int = 5,
         combination_type: str = "cat",
         similarity_measure: Callable[
             [npt.NDArray, npt.NDArray], np.float64
         ] = lambda v1, v2: 1 / np.linalg.norm(v1 - v2),
-        sort_descending: bool = True
+        sort_descending: bool = True,
     ) -> tuple[dict[str, float], dict[str, float]]:
-        
         from detectron2.evaluation import inference_context, SemSegEvaluator
         from contextlib import ExitStack
 
@@ -539,7 +538,6 @@ class DomainOrchestrator:
         t0 = time.time()
 
         for current_target_domain_name in target_domains:
-            
             current_target_domain = self._target_domains[current_target_domain_name]
 
             self._set_current_target_domain(
@@ -551,9 +549,6 @@ class DomainOrchestrator:
 
             model = self.current_model
 
-            # These lines are adopted from
-            # https://github.com/facebookresearch/detectron2/blob/2a420edb307c9bdf640f036d3b196bed474b8593/detectron2/evaluation/evaluator.py#L103
-
             evaluator.reset()
 
             with ExitStack() as stack:
@@ -562,7 +557,6 @@ class DomainOrchestrator:
                 stack.enter_context(torch.no_grad())
 
                 for _, inputs in enumerate(data_loader):
-
                     input_path = inputs[0]["file_name"]
 
                     print(f"Predicting image: {input_path}")
@@ -572,7 +566,7 @@ class DomainOrchestrator:
                     weight_dict, merged_adpater_name = self._merge(
                         target_domain=current_target_domain,
                         remove_target_adapter=remove_target_adapter,
-                        mode="centroid", 
+                        mode="centroid",
                         target_embedding=current_embedding,
                         softmax_temperature=softmax_temperature,
                         top_k=top_k,

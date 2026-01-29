@@ -11,4 +11,4 @@ wandb==0.16.5
 regex
 einops
 cityscapesscripts
-git+https://github.com/facebookresearch/detectron2.git
+#git+https://github.com/facebookresearch/detectron2.git

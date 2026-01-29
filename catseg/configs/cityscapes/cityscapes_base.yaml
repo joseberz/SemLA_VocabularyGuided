@@ -1,4 +1,4 @@
-_BASE_: ../vitl_336.yaml
+_BASE_: ../vitb_384.yaml
 MODEL:
   SEM_SEG_HEAD:
     TRAIN_CLASS_JSON: "datasets/cs19.json"
@@ -6,10 +6,11 @@ MODEL:
     NUM_CLASSES: 19
 DATASETS:
   TRAIN: ("cs-normal_sem_seg_train",)
-  TEST: ("cs-normal_sem_seg_val", "cs-rain-25mm_sem_seg_val", "cs-rain-50mm_sem_seg_val", "cs-rain-75mm_sem_seg_val", "cs-rain-100mm_sem_seg_val", "cs-rain-200mm_sem_seg_val")
+  #TEST: ("cs-normal_sem_seg_val", "cs-rain-25mm_sem_seg_val", "cs-rain-50mm_sem_seg_val", "cs-rain-75mm_sem_seg_val", "cs-rain-100mm_sem_seg_val", "cs-rain-200mm_sem_seg_val")
+  TEST: ("cs-normal_sem_seg_val",)
 SOLVER:
   CHECKPOINT_PERIOD: 100000
-  IMS_PER_BATCH: 4
+  IMS_PER_BATCH: 2
   LR_SCHEDULER_NAME: WarmupCosineLR
   WARMUP_FACTOR: 0.01
   WARMUP_ITERS: 1000
@@ -34,5 +35,5 @@ INPUT:
 TEST:
   EVAL_PERIOD: 100000
 DATALOADER:
-  NUM_WORKERS: 4
+  NUM_WORKERS: 2
 SEED: 250

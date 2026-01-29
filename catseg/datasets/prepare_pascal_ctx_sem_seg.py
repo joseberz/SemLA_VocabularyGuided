@@ -51,7 +51,7 @@ def copy_images(img_info, img_dir, out_dir):
 
 if __name__ == "__main__":
     dataset_dir = Path(os.getenv("DETECTRON2_DATASETS", "datasets")) / "pascal_ctx_d2"
-    voc_dir = Path(os.getenv("DETECTRON2_DATASETS", "datasets")) / "VOCdevkit/VOC2010"
+    voc_dir = Path(os.getenv("DETECTRON2_DATASETS", "datasets")) / "pc59/VOCdevkit/VOC2010"
     for split in ["training", "validation"]:
         img_dir = voc_dir / "JPEGImages"
         if split == "training":

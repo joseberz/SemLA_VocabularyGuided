@@ -4,7 +4,7 @@ import logging
 import os
 from typing import Literal
 
-DETECTRON2_DATASET_PATH = os.getenv("DETECTRON2_DATASETS")
+DETECTRON2_DATASET_PATH = "/home/joshi/Desktop/HSB/SemLA/catseg/datasets/"
 
 def get_domain_args(
     domain_name: str,

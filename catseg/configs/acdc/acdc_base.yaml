@@ -1,4 +1,4 @@
-_BASE_: ../vitl_336.yaml
+_BASE_: ../vitb_384.yaml
 MODEL:
   SEM_SEG_HEAD:
     TRAIN_CLASS_JSON: "datasets/cs19.json"

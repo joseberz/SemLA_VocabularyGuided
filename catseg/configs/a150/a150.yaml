@@ -1,4 +1,6 @@
 _BASE_: ../base.yaml
+SOLVER:
+  IMS_PER_BATCH: 1
 MODEL:
   SEM_SEG_HEAD:
     NUM_CLASSES: 150

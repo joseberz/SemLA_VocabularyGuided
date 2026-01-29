@@ -26,12 +26,12 @@ def get_nyudv2_dicts(path: str, mode: str):
     # Read the first image to get height and width
     with open(file_path, "r") as file:
         first_line = file.readline().strip()
-        rgb, label, depth = first_line.split(",")
+        rgb, label, depth = first_line.split("\t")
         height, width = cv2.imread(f"{path}/{rgb}").shape[:2]
     
     with open(file_path, "r") as file:
         for idx, line in enumerate(file):
-            rgb, label, depth = line.strip().split(",")
+            rgb, label, depth = line.strip().split("\t")
             record = dict()
             record["file_name"] = f"{path}/{rgb}"
             record["image_id"] = idx
@@ -56,4 +56,4 @@ def register_nyudv2_dataset(base_path):
         )
 
 _root = os.getenv("DETECTRON2_DATASETS", "datasets")
-register_nyudv2_dataset(_root + "nyudv2")
+register_nyudv2_dataset(_root + "/nyudv2")

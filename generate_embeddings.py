@@ -29,8 +29,9 @@ if __name__ == "__main__":
     for domain_name in source_domains:
 
         args = get_domain_args(domain_name, "train", get_cofing_only=True)
+        print(domain_name)
         train_dataset_path = Path(args.train_dataset_path)
-        print(train_dataset_path)
+        #print(train_dataset_path)
 
         assert train_dataset_path.exists(), f"Path to training dataset {train_dataset_path} does not exist!"
 

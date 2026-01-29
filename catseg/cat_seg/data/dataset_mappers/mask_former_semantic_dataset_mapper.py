@@ -109,9 +109,11 @@ class MaskFormerSemanticDatasetMapper:
         image = utils.read_image(dataset_dict["file_name"], format=self.img_format)
         utils.check_image_size(dataset_dict, image)
 
+        sem_seg_file_name = None
         if "sem_seg_file_name" in dataset_dict:
             # PyTorch transformation not implemented for uint16, so converting it to double first
-            sem_seg_gt = utils.read_image(dataset_dict.pop("sem_seg_file_name")).astype("double")
+            sem_seg_file_name = dataset_dict.pop("sem_seg_file_name")
+            sem_seg_gt = utils.read_image(sem_seg_file_name).astype("double")
         else:
             sem_seg_gt = None
 
@@ -121,6 +123,14 @@ class MaskFormerSemanticDatasetMapper:
                     dataset_dict["file_name"]
                 )
             )
+
+        if image.shape[:2] != sem_seg_gt.shape[:2]:
+            print("MISMATCH!",
+                    dataset_dict["file_name"],
+                    sem_seg_file_name,
+                    "img:", image.shape[:2],
+                    "seg:", sem_seg_gt.shape[:2])
+            raise ValueError("image/sem_seg size mismatch")
 
         aug_input = T.AugInput(image, sem_seg=sem_seg_gt)
         aug_input, transforms = T.apply_transform_gens(self.tfm_gens, aug_input)

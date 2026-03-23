@@ -18,6 +18,7 @@ from . import (
     register_bdd100k,
     register_mapillary_vistas,
     register_ade20k_semantic,
+    register_ade20k_133_semantic,
     register_idd,
     register_pascal_ctx_59_sem_seg,
     register_nyudv2,

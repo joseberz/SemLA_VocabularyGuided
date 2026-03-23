@@ -27,9 +27,8 @@ if __name__ == "__main__":
     print("Generating embeddings for all source domains ...")
     
     for domain_name in source_domains:
-
-        args = get_domain_args(domain_name, "train", get_cofing_only=True)
         print(domain_name)
+        args = get_domain_args(domain_name, "train", get_cofing_only=True)
         train_dataset_path = Path(args.train_dataset_path)
         #print(train_dataset_path)
 

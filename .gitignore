@@ -4,4 +4,5 @@ wandb/
 catseg/loradb/
 catseg/output/
 catseg/models/
+catseg/datasets/
 results/

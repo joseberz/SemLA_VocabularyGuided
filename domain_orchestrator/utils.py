@@ -4,7 +4,8 @@ import logging
 import os
 from typing import Literal
 
-DETECTRON2_DATASET_PATH = "/home/joshi/Desktop/HSB/SemLA/catseg/datasets/"
+DETECTRON2_DATASET_PATH = "/home/joshi/Desktop/HSB/SemLA_VocabularyGuided/catseg/datasets/"
+ALT_PFAD = "/datasets/"
 
 def get_domain_args(
     domain_name: str,
@@ -39,6 +40,7 @@ def get_domain_args(
         "bdd",
         "mv",
         "a150",
+        "a133",
         "idd",
         "pc59",
         "nyu",
@@ -52,6 +54,8 @@ def get_domain_args(
 
     MUSES_DOMAIN_CHECK = {"clear", "rain", "fog", "snow"}
     MUSES_SUB_DOMAIN_CHECK = {"day", "night"}
+
+    A150_SPLIT_CHECK = {"split0", "split1"}
 
     # Configurations assertions
     assert dataset in DATASET_CHECK
@@ -80,6 +84,10 @@ def get_domain_args(
             domain in ACDC_DOMAIN_CHECK
         ), f"Domain '{domain}' is not supported for ACDC"
         assert sub_domain == "", "Volume is not supported in ACDC"
+    elif dataset == "a150":
+        assert (
+            domain in A150_SPLIT_CHECK
+        ), f"Split '{domain}' is not supported for ADE150"
 
     assert mode in MODE_CHECK, "Mode '{mode}' not supported"
 
@@ -95,7 +103,10 @@ def get_domain_args(
         "bdd": "configs/bdd/bdd.yaml",
         "mv": "configs/mv/mv.yaml",
         "nyu": "configs/nyu/nyu.yaml",
-        "a150": "configs/a150/a150.yaml",
+        "a150": {
+            f"{domain}": f"configs/a150/a150-{domain}.yaml"
+        },
+        "a133": "configs/a133/a133.yaml",
         "idd": "configs/idd/idd.yaml",
         'pc59': 'configs/pc59/pc59.yaml',
         'nyu': 'configs/nyu/nyu.yaml',
@@ -126,12 +137,16 @@ def get_domain_args(
             "val": f"{DETECTRON2_DATASET_PATH}mapillary_vistas/val/images/",
         },
         "a150": {
-            "train": f"{DETECTRON2_DATASET_PATH}ADE20k/images/training/",
-            "val": f"{DETECTRON2_DATASET_PATH}ADE20k/images/validation/",
+            "train": f"{DETECTRON2_DATASET_PATH}ADEChallengeData2016/split/{domain}/images/training/",
+            "val": f"{DETECTRON2_DATASET_PATH}ADEChallengeData2016/split/{domain}/images/validation/",
+        },
+        "a133": {
+            "train": f"{DETECTRON2_DATASET_PATH}ADE133_ignore_thre_0_1/images/training/", # TODO
+            "val": f"{DETECTRON2_DATASET_PATH}ADE133_ignore_thre_0_1/images/validation/", # TODO
         },
         "idd": {
-            "train": f"{DETECTRON2_DATASET_PATH}IDD_Segmentation/leftImg8bit/train/",
-            "val": f"{DETECTRON2_DATASET_PATH}IDD_Segmentation/leftImg8bit/val/",
+            "train": f"{ALT_PFAD}IDD_Segmentation/leftImg8bit/train/",
+            "val": f"{ALT_PFAD}IDD_Segmentation/leftImg8bit/val/",
         },
         "pc59": {
             "train": f"{DETECTRON2_DATASET_PATH}pascal_ctx_d2/images/training",
@@ -142,8 +157,8 @@ def get_domain_args(
             "val": f"{DETECTRON2_DATASET_PATH}nyudv2_splitted/test/rgb",
         },
         "coconutL": {
-            "train": f"{DETECTRON2_DATASET_PATH}coconut-l/train2017/",
-            "val": f"{DETECTRON2_DATASET_PATH}coconut-l/val2017",
+            "train": f"{ALT_PFAD}coco/train2017/",
+            "val": f"{ALT_PFAD}coco/val2017/",
         },
     }
 

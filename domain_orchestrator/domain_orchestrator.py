@@ -582,8 +582,8 @@ class DomainOrchestrator:
                         weights.setdefault(domain, []).append(weight)
 
                     model = self.current_model
-
-                    outputs = model(inputs)
+                    with torch.no_grad():
+                        outputs = model(inputs)
 
                     if torch.cuda.is_available():
                         torch.cuda.synchronize()

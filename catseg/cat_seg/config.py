@@ -13,6 +13,7 @@ def add_cat_seg_config(cfg):
     # select the dataset mapper
     cfg.INPUT.DATASET_MAPPER_NAME = "mask_former_semantic"
 
+    cfg.DOMAIN_NAME = "default"
     cfg.DATASETS.VAL_ALL = ("coco_2017_val_all_stuff_sem_seg",)
 
     # Color augmentation
@@ -25,6 +26,7 @@ def add_cat_seg_config(cfg):
 
     # solver config
     # weight decay on embedding
+    cfg.SOLVER.ACCUM_STEPS = 1
     cfg.SOLVER.WEIGHT_DECAY_EMBED = 0.0
     # optimizer
     cfg.SOLVER.OPTIMIZER = "ADAMW"
@@ -101,6 +103,9 @@ def add_cat_seg_config(cfg):
 
     cfg.MODEL.SEM_SEG_HEAD.CLIP_FINETUNE = "attention"
     cfg.TEST.SLIDING_WINDOW = False
+    cfg.TEST.MAX_IMAGES = -1
+    cfg.TEST.LOSS_EVAL_PERIOD = 100
+    cfg.TEST.IMS_PER_BATCH = 1
 
 
 def add_lora_config(

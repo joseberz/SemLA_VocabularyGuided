@@ -683,7 +683,7 @@ class SwinTransformer(nn.Module):
         self._freeze_stages()
 
 
-@BACKBONE_REGISTRY.register()
+#@BACKBONE_REGISTRY.register()
 class D2SwinTransformer(SwinTransformer, Backbone):
     def __init__(self, cfg, input_shape):
 

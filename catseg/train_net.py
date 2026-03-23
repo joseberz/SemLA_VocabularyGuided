@@ -11,9 +11,11 @@ import copy
 import itertools
 import logging
 import os
+import time
 from collections import OrderedDict
 from typing import Any, Dict, List, Set
 import glob
+
 from PIL import Image
 import weakref
 import sys
@@ -32,7 +34,6 @@ from detectron2.data import (
     build_detection_train_loader,
     build_detection_test_loader,
 )
-import detectron2.data.transforms as T
 
 from detectron2.checkpoint import DetectionCheckpointer
 
@@ -61,6 +62,17 @@ import detectron2.utils.comm as comm
 from detectron2.utils.logger import setup_logger
 from detectron2.utils.file_io import PathManager
 
+from detectron2.config import configurable
+from detectron2.data import get_detection_dataset_dicts, DatasetMapper, DatasetFromList, MapDataset
+from detectron2.data.build import trivial_batch_collator
+from detectron2.data.samplers import InferenceSampler
+
+from .LossEvalHook import LossEvalHook
+from .data_utils import build_custom_test_loader
+from .LossEvalHook import AccumLRScheduler
+from detectron2.engine import hooks
+from detectron2.utils.events import TensorboardXWriter, get_event_storage
+
 # Add the root of the project to the python path to find cat_seg
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))  # Adds current directory
 
@@ -68,6 +80,7 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))  # Adds current d
 from cat_seg import (
     DETRPanopticDatasetMapper,
     MaskFormerPanopticDatasetMapper,
+    MaskFormerSemanticDatasetMapperVal,
     MaskFormerSemanticDatasetMapper,
     SemanticSegmentorWithTTA,
     ResizedMaskFormerSemanticDatasetMapper,
@@ -79,7 +92,13 @@ from cat_seg import (
 import cv2
 import peft
 import json
-import wandb 
+import wandb
+
+LAYOUT = {
+    "ABCDE": {
+        "loss": ["Multiline", ["loss/train", "loss/val"]]
+    },
+}
 
 
 def set_random_seed(seed=0, deterministic=True):
@@ -606,6 +625,54 @@ class ResizedCityscapesSemSegEvaluator(CityscapesSemSegEvaluator):
         self._working_dir.cleanup()
         return ret
 
+class AccumSimpleTrainer(SimpleTrainer):
+    def __init__(self, model, data_loader, optimizer, accum_steps: int = 1,
+                 zero_grad_before_forward: bool = False, async_write_metrics: bool = False):
+        super().__init__(model, data_loader, optimizer,
+                         zero_grad_before_forward=zero_grad_before_forward,
+                         async_write_metrics=async_write_metrics)
+        self.accum_steps = max(1, int(accum_steps))
+        self.did_step = False
+
+    def run_step(self):
+        assert self.model.training, "[AccumSimpleTrainer] model was changed to eval mode!"
+        start = time.perf_counter()
+        data = next(self._data_loader_iter)
+        data_time = time.perf_counter() - start
+
+        self.did_step = False
+        accum_idx = (self.iter % self.accum_steps)
+
+        # zero grads only at start of an accumulation cycle
+        if accum_idx == 0:
+            self.optimizer.zero_grad(set_to_none=True)
+
+        storage = get_event_storage()
+        storage.put_scalar("lr", self.optimizer.param_groups[0]["lr"], smoothing_hint=False)
+
+        # forward
+        loss_dict = self.model(data)
+        if isinstance(loss_dict, torch.Tensor):
+            losses = loss_dict
+            loss_dict = {"total_loss": loss_dict}
+        else:
+            losses = sum(loss_dict.values())
+
+        # scale loss for accumulation (so gradients match larger batch)
+        (losses / self.accum_steps).backward()
+
+        self.after_backward()
+
+        if self.async_write_metrics:
+            self.concurrent_executor.submit(self._write_metrics, loss_dict, data_time, iter=self.iter)
+        else:
+            self._write_metrics(loss_dict, data_time)
+
+        if (accum_idx + 1) == self.accum_steps:
+            self.optimizer.step()
+            self.did_step = True
+            storage.put_scalar("loss/train", float(losses.detach().cpu()), smoothing_hint=True)
+
 
 class Trainer(DefaultTrainer):
     """
@@ -616,26 +683,24 @@ class Trainer(DefaultTrainer):
         """
         Resets the trainer attributes after assigning new model
         """
+        self.accum_steps = cfg.SOLVER.get("ACCUM_STEPS", 1)
+
+        # Full reset (neues Training oder bewusst kein Resume)
         self.model = model
         self.optimizer = self.build_optimizer(cfg, self.model)
         self.data_loader = self.build_train_loader(cfg)
 
-        self.model = create_ddp_model(
-            self.model, broadcast_buffers=False, find_unused_parameters=True
-        )
-        self._trainer = (AMPTrainer if cfg.SOLVER.AMP.ENABLED else SimpleTrainer)(
-            self.model, self.data_loader, self.optimizer
-        )
+        self.model = create_ddp_model(self.model, broadcast_buffers=False, find_unused_parameters=True)
 
         self.scheduler = self.build_lr_scheduler(cfg, self.optimizer)
 
-        self.checkpointer = DetectionCheckpointer(
-            # Assume you want to save checkpoints together with logs/statistics
-            self.model,
-            cfg.OUTPUT_DIR,
-            trainer=weakref.proxy(self),
-        )
+        Inner = AccumSimpleTrainer
+        self._trainer = Inner(self.model, self.data_loader, self.optimizer, accum_steps=self.accum_steps)
 
+        self.checkpointer = DetectionCheckpointer(self.model, cfg.OUTPUT_DIR, trainer=weakref.proxy(self))
+
+        self._hooks = []
+        self.register_hooks(self.build_hooks())
         self.cfg = cfg
 
     @classmethod
@@ -741,12 +806,18 @@ class Trainer(DefaultTrainer):
 
     @classmethod
     def build_test_loader(cls, cfg, dataset_name):
+        test_loader = None
         # Reszied semantic segmentation test dataset mapper
         if cfg.INPUT.DATASET_MAPPER_NAME == "resized_mask_former_semantic":
             mapper = ResizedMaskFormerSemanticTestDatasetMapper(cfg, False)
-            return build_detection_test_loader(cfg, dataset_name, mapper=mapper)
+            #test_loader = build_detection_test_loader(cfg, dataset_name, mapper=mapper)
+            test_loader = build_custom_test_loader(cfg, dataset_name, mapper=mapper)
         else:
-            return build_detection_test_loader(cfg, dataset_name)
+            mapper = MaskFormerSemanticDatasetMapperVal(cfg, False)
+            #test_loader = build_detection_test_loader(cfg, dataset_name)
+            test_loader = build_custom_test_loader(cfg, dataset_name, mapper=mapper)
+
+        return test_loader
 
     @classmethod
     def build_lr_scheduler(cls, cfg, optimizer):
@@ -859,6 +930,36 @@ class Trainer(DefaultTrainer):
         res = cls.test(cfg, model, evaluators)
         res = OrderedDict({k + "_TTA": v for k, v in res.items()})
         return res
+
+    def build_hooks(self):
+        hooks_list = super().build_hooks()
+
+        # Remove default LRScheduler hook (it steps every iter)
+        hooks_list = [h for h in hooks_list if not isinstance(h, hooks.LRScheduler)]
+
+        # Add our accum-aware scheduler hook
+        hooks_list.insert(-1, AccumLRScheduler(self.optimizer, self.scheduler))
+
+        val_loader = self.build_test_loader(self.cfg, self.cfg.DATASETS.TEST[0])
+        hooks_list.insert(-1, LossEvalHook(
+            self.cfg.TEST.LOSS_EVAL_PERIOD,
+            self.model,
+            val_loader
+        ))
+        return hooks_list
+
+    def build_writers(self):
+        writers = super().build_writers()
+        if comm.is_main_process():
+            for w in writers:
+                if isinstance(w, TensorboardXWriter):
+                    w._writer.add_custom_scalars(LAYOUT)
+
+                    try:
+                        w._writer.flush()
+                    except Exception:
+                        pass
+        return writers
 
 
 def add_lora(cfg, model):

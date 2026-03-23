@@ -57,6 +57,9 @@ def register_bdd100k_sem_seg(root):
         image_dir = os.path.join(root, "images", "10k" ,dirname)
         gt_dir = os.path.join(root, "labels", "sem_seg", "masks", dirname)
         name = f"bdd_sem_seg_{name}"
+
+        if name in DatasetCatalog:
+            continue  # schon registriert -> nix tun
         DatasetCatalog.register(
             name, lambda x=image_dir, y=gt_dir: load_sem_seg(y, x, gt_ext="png", image_ext="jpg")
         )

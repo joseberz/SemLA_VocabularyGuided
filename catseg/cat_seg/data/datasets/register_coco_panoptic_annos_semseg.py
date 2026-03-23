@@ -156,6 +156,9 @@ def register_coco_panoptic_annos_sem_seg(
 
     # the name is "coconutL_sem_seg_train" and "coconutL_sem_seg_val"
     semantic_name = "coconutL_sem_seg_train" if "train" in name else "coconutL_sem_seg_val"
+
+    if semantic_name in DatasetCatalog:
+        return  # schon registriert -> nix tun
     DatasetCatalog.register(
         semantic_name,
         lambda: load_coco_panoptic_json(panoptic_json, image_root, panoptic_root, sem_seg_root, metadata),
@@ -181,6 +184,7 @@ def register_all_coco_panoptic_annos_sem_seg(root):
         prefix_instances = prefix[: -len("_panoptic")].replace("openvocab_", "")
         instances_meta = MetadataCatalog.get(prefix_instances)
         image_root, instances_json = instances_meta.image_root, instances_meta.json_file
+        #image_root, instances_json = "/" + image_root, "/" + instances_json
 
         register_coco_panoptic_annos_sem_seg(
             prefix,

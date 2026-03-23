@@ -201,6 +201,9 @@ def register_all_coco_stuff_10k(root):
         image_dir = os.path.join(root, image_dirname)
         gt_dir = os.path.join(root, sem_seg_dirname)
         name = f"coco_2017_{name}_stuff_all_sem_seg"
+
+        if name in DatasetCatalog:
+            continue  # schon registriert -> nix tun
         DatasetCatalog.register(
             name, lambda x=image_dir, y=gt_dir: load_sem_seg(y, x, gt_ext="png", image_ext="jpg")
         )

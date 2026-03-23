@@ -26,6 +26,9 @@ def register_muses_clear_day(root):
 
         sem_key = key.format(task="sem_seg")
 
+        if sem_key in DatasetCatalog:
+            continue  # schon registriert -> nix tun
+
         DatasetCatalog.register(
             sem_key, lambda x=image_dir, y=gt_dir: load_muses_semantic(x, y)
         )

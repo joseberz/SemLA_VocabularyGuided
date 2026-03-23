@@ -494,6 +494,9 @@ def register_mapillary_vistas_semseg(root):
         image_dir = os.path.join(root, dirname, "images")
         gt_dir = os.path.join(root, dirname, "labels")
         name = f"mv_sem_seg_{name}"
+
+        if name in DatasetCatalog:
+            continue  # schon registriert -> nix tun
         DatasetCatalog.register(
             name, lambda x=image_dir, y=gt_dir: load_sem_seg(y, x, gt_ext="png", image_ext="jpg")
         )

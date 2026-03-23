@@ -150,6 +150,9 @@ def register_idd_dataset(root):
         meta = _get_idd_sem_seg_meta()
         sem_key = key.format(task="sem_seg")
 
+        if sem_key in DatasetCatalog:
+            continue  # schon registriert -> nix tun
+
         DatasetCatalog.register(
             sem_key, lambda x=image_dir, y=gt_dir: load_idd_semantic(x, y)
         )
@@ -162,5 +165,5 @@ def register_idd_dataset(root):
         )
         
 _root = os.getenv("DETECTRON2_DATASETS", "datasets")
-
+_root = "/datasets"
 register_idd_dataset(_root)

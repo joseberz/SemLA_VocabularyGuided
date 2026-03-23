@@ -22,6 +22,9 @@ def register_colored_resized_cityscapes(root):
         gt_dir = os.path.join(root, gt_dir)
 
         sem_key = key.format(task="sem_seg")
+
+        if sem_key in DatasetCatalog:
+            continue  # schon registriert -> nix tun
         DatasetCatalog.register(
             sem_key, lambda x=image_dir, y=gt_dir: load_cityscapes_semantic(x, y)
         )

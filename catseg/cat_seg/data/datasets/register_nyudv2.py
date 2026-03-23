@@ -26,12 +26,12 @@ def get_nyudv2_dicts(path: str, mode: str):
     # Read the first image to get height and width
     with open(file_path, "r") as file:
         first_line = file.readline().strip()
-        rgb, label, depth = first_line.split("\t")
+        rgb, label, depth = first_line.split(",")
         height, width = cv2.imread(f"{path}/{rgb}").shape[:2]
     
     with open(file_path, "r") as file:
         for idx, line in enumerate(file):
-            rgb, label, depth = line.strip().split("\t")
+            rgb, label, depth = line.strip().split(",")
             record = dict()
             record["file_name"] = f"{path}/{rgb}"
             record["image_id"] = idx
@@ -47,6 +47,9 @@ def get_nyudv2_dicts(path: str, mode: str):
 def register_nyudv2_dataset(base_path):
     for d in ["train", "test"]:
         split = 'val' if d == 'test' else 'train'
+
+        if f"nyu_sem_seg_{split}" in DatasetCatalog:
+            continue  # schon registriert -> nix tun
         DatasetCatalog.register(f"nyu_sem_seg_{split}", lambda d=d: get_nyudv2_dicts(base_path, d))
         MetadataCatalog.get(f"nyu_sem_seg_{split}").set(
             evaluator_type="sem_seg",

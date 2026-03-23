@@ -1,4 +1,5 @@
 _BASE_: ../muses_base.yaml
+DOMAIN_NAME: muses-clear-night
 DATASETS:
   TRAIN: ("muses-clear-night_sem_seg_train",)
   TEST: ("muses-clear-night_sem_seg_val",)

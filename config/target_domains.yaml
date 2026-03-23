@@ -1,20 +1,20 @@
+- mv # DONE sh run_lora.sh configs/mv/mv.yaml 1 output/mv/ MODEL.LORA.NAME mv
+- a133 # DONE
+- coconutL # DONEsh run_lora.sh configs/coconutL/coconutL.yaml 1 output/coconutL/ MODEL.LORA.NAME coconutL | last IoU 61.5806
 - acdc-rain
 - acdc-fog
 - acdc-snow
 - acdc-night
-# - muses-clear-day
-# - muses-clear-night
-# - muses-rain-day
-# - muses-rain-night
-# - muses-fog-day
-# - muses-fog-night
-# - muses-snow-night
-# - muses-snow-day
-# - cs-normal
-# - bdd
-# - mv
-# - a150
-# - idd
-# - pc59
-# - coconutL
-# - nyu
+- muses-clear-day
+- muses-clear-night
+- muses-rain-day
+- muses-rain-night
+- muses-fog-day
+- muses-fog-night
+- muses-snow-night
+- muses-snow-day
+- cs-normal
+- bdd
+- idd
+- pc59
+- nyu

@@ -1,4 +1,5 @@
 _BASE_: ../acdc_base.yaml
+DOMAIN_NAME: acdc-night
 DATASETS:
   TRAIN: ("acdc-night_sem_seg_train",)
   TEST: ("acdc-night_sem_seg_val",)

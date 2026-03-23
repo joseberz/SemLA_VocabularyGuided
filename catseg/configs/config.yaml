@@ -31,7 +31,8 @@ DATASETS:
   TRAIN: ("coco_2017_train_stuff_all_sem_seg",)
   TEST: ("coco_2017_test_stuff_all_sem_seg",)
 SOLVER:
-  IMS_PER_BATCH: 4
+  ACCUM_STEPS: 4
+  IMS_PER_BATCH: 1 #4
   BASE_LR: 0.0002
   MAX_ITER: 80000
   WARMUP_FACTOR: 1.0

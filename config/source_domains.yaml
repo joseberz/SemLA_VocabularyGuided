@@ -1,20 +1,20 @@
-- acdc-rain
-- acdc-fog
-- acdc-snow
-- acdc-night
-- muses-clear-day
-- muses-clear-night
-- muses-rain-day
-- muses-rain-night
-- muses-fog-day
-- muses-fog-night
-- muses-snow-night
-- muses-snow-day
-- cs-normal
-- bdd
-- mv
-#- a150
-#- idd
-- pc59
-#- coconutL
-- nyu
+- mv # DONE sh run_lora.sh configs/mv/mv.yaml 1 output/mv/ MODEL.LORA.NAME mv
+- a133 # DONE
+- coconutL # DONEsh run_lora.sh configs/coconutL/coconutL.yaml 1 output/coconutL/ MODEL.LORA.NAME coconutL | last IoU 61.5806
+- acdc-rain # DONE sh run_lora.sh configs/acdc/rain/lora-rain-acdc.yaml 1 output/acdc-rain/ MODEL.LORA.NAME acdc-rain
+- acdc-fog # DONE sh run_lora.sh configs/acdc/fog/lora-fog-acdc.yaml 1 output/acdc-fog/ MODEL.LORA.NAME acdc-fog
+- acdc-snow # DONE sh run_lora.sh configs/acdc/snow/lora-snow-acdc.yaml 1 output/acdc-snow/ MODEL.LORA.NAME acdc-snow
+- acdc-night # DONE sh run_lora.sh configs/acdc/night/lora-night-acdc.yaml 1 output/acdc-night/ MODEL.LORA.NAME acdc-night
+- muses-clear-day # DONE sh run_lora.sh configs/muses/clear/muses-clear-day.yaml 1 output/muses-clear-day/ MODEL.LORA.NAME muses-clear-day
+- muses-clear-night # DONE sh run_lora.sh configs/muses/clear/muses-clear-night.yaml 1 output/muses-clear-night/ MODEL.LORA.NAME muses-clear-night
+- muses-rain-day # DONE sh run_lora.sh configs/muses/rain/muses-rain-day.yaml 1 output/muses-rain-day/ MODEL.LORA.NAME muses-rain-day
+- muses-rain-night # DONE sh run_lora.sh configs/muses/rain/muses-rain-night.yaml 1 output/muses-rain-night/ MODEL.LORA.NAME muses-rain-night
+- muses-fog-day # DONE sh run_lora.sh configs/muses/fog/muses-fog-day.yaml 1 output/muses-fog-day/ MODEL.LORA.NAME muses-fog-day
+- muses-fog-night # DONE sh run_lora.sh configs/muses/fog/muses-fog-night.yaml 1 output/muses-fog-night/ MODEL.LORA.NAME muses-fog-night
+- muses-snow-night # DONE sh run_lora.sh configs/muses/snow/muses-snow-night.yaml 1 output/muses-snow-night/ MODEL.LORA.NAME muses-snow-night
+- muses-snow-day # DONE sh run_lora.sh configs/muses/snow/muses-snow-day.yaml 1 output/muses-snow-day/ MODEL.LORA.NAME muses-snow-day
+- cs-normal # DONE sh run_lora.sh configs/cityscapes/normal/lora-normal.yaml 1 output/cs-normal/ MODEL.LORA.NAME cs-normal | last IoU 62.9144,33.3965,77.8264,52.7424
+- bdd # TODO RERUN sh run_lora.sh configs/bdd/bdd.yaml 1 output/bdd/ MODEL.LORA.NAME bdd | last IoU 55.2075
+- idd # DONE sh run_lora.sh configs/idd/idd.yaml 1 output/idd/ MODEL.LORA.NAME idd
+- pc59 # DONE sh run_lora.sh configs/pc59/pc59.yaml 1 output/pc59/ MODEL.LORA.NAME pc59
+- nyu # DONE sh run_lora.sh configs/nyu/nyu.yaml 1 output/nyu/ MODEL.LORA.NAME nyu

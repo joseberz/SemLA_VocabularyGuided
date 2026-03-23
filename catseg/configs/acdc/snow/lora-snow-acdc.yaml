@@ -1,4 +1,5 @@
 _BASE_: ../acdc_base.yaml
+DOMAIN_NAME: acdc-snow
 DATASETS:
   TRAIN: ("acdc-snow_sem_seg_train",)
   TEST: ("acdc-snow_sem_seg_val",)

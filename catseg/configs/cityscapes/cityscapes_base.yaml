@@ -9,15 +9,16 @@ DATASETS:
   #TEST: ("cs-normal_sem_seg_val", "cs-rain-25mm_sem_seg_val", "cs-rain-50mm_sem_seg_val", "cs-rain-75mm_sem_seg_val", "cs-rain-100mm_sem_seg_val", "cs-rain-200mm_sem_seg_val")
   TEST: ("cs-normal_sem_seg_val",)
 SOLVER:
+  ACCUM_STEPS: 4
   CHECKPOINT_PERIOD: 100000
-  IMS_PER_BATCH: 2
+  IMS_PER_BATCH: 1 #4
   LR_SCHEDULER_NAME: WarmupCosineLR
   WARMUP_FACTOR: 0.01
-  WARMUP_ITERS: 1000
+  WARMUP_ITERS: 2000 #1000
   WARMUP_METHOD: "linear"
   WEIGHT_DECAY: 0.00001
   BASE_LR: 0.0001
-  MAX_ITER: 20000
+  MAX_ITER: 32000 #20000
   BACKBONE_MULTIPLIER: 0.0
   CLIP_MULTIPLIER: 1.0
 INPUT:
@@ -33,7 +34,9 @@ INPUT:
   SIZE_DIVISIBILITY: 384
   DATASET_MAPPER_NAME: "resized_mask_former_semantic"
 TEST:
-  EVAL_PERIOD: 100000
+  EVAL_PERIOD: 5000 #100000
+  LOSS_EVAL_PERIOD: 2000
+  IMS_PER_BATCH: 1
 DATALOADER:
-  NUM_WORKERS: 2
+  NUM_WORKERS: 4
 SEED: 250

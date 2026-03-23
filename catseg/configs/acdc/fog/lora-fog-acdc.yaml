@@ -1,4 +1,5 @@
 _BASE_: ../acdc_base.yaml
+DOMAIN_NAME: acdc-fog
 DATASETS:
   TRAIN: ("acdc-fog_sem_seg_train",)
   TEST: ("acdc-fog_sem_seg_val",)

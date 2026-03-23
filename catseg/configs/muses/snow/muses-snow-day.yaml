@@ -1,4 +1,5 @@
 _BASE_: ../muses_base.yaml
+DOMAIN_NAME: muses-snow-day
 DATASETS:
   TRAIN: ("muses-snow-day_sem_seg_train",)
   TEST: ("muses-snow-day_sem_seg_val",)

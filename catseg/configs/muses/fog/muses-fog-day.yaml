@@ -1,4 +1,8 @@
 _BASE_: ../muses_base.yaml
+DOMAIN_NAME: muses-fog-day
+SOLVER:
+  WARMUP_ITERS: 300
+  MAX_ITER: 1500
 DATASETS:
   TRAIN: ("muses-fog-day_sem_seg_train",)
   TEST: ("muses-fog-day_sem_seg_val",)

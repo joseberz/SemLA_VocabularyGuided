@@ -1,3 +1,4 @@
+# https://github.com/rezaqorbani/SemLA/issues/6
 _BASE_: ../vitb_384.yaml
 MODEL:
   SEM_SEG_HEAD:
@@ -8,14 +9,15 @@ DATASETS:
   TRAIN: ("muses-clear-day_sem_seg_train",)
   TEST: ("muses-clear-day_sem_seg_val",)
 SOLVER:
-  IMS_PER_BATCH: 2
+  ACCUM_STEPS: 2
+  IMS_PER_BATCH: 1 # 2
   LR_SCHEDULER_NAME: WarmupCosineLR
   WARMUP_FACTOR: 0.01
-  WARMUP_ITERS: 1000
+  WARMUP_ITERS: 500
   WARMUP_METHOD: "linear"
   WEIGHT_DECAY: 0.0001
   BASE_LR: 0.00001
-  MAX_ITER: 3000
+  MAX_ITER: 2000
   BACKBONE_MULTIPLIER: 0.0
   CLIP_MULTIPLIER: 1.0
   CHECKPOINT_PERIOD: 100000
@@ -33,7 +35,9 @@ INPUT:
   FORMAT: "RGB"
   DATASET_MAPPER_NAME: "mask_former_semantic"
 TEST:
-  EVAL_PERIOD: 100000
+  EVAL_PERIOD: 500
+  LOSS_EVAL_PERIOD: 150
+  IMS_PER_BATCH: 1
 DATALOADER:
   NUM_WORKERS: 4
 SEED: 250

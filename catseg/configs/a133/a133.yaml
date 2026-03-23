@@ -6,14 +6,14 @@ SOLVER:
 MODEL:
   SEM_SEG_HEAD:
     NUM_CLASSES: 133
-    TRAIN_CLASS_JSON: "datasets/ade150.json"
-    TEST_CLASS_JSON: "datasets/ade150.json"
+    TRAIN_CLASS_JSON: "datasets/ade133.json"
+    TEST_CLASS_JSON: "datasets/ade133.json"
 DATASETS:
-  TRAIN: ("a150_sem_seg_train",)
-  TEST: ("a150_sem_seg_val",)
+  TRAIN: ("a133_sem_seg_train",)
+  TEST: ("a133_sem_seg_val",)
 TEST:
-  EVAL_PERIOD: 2000 #100000 #5000
-  LOSS_EVAL_PERIOD: 1000 #1000
+  EVAL_PERIOD: 5000 #100000 #5000
+  LOSS_EVAL_PERIOD: 3000 #1000
   IMS_PER_BATCH: 1 #2
 INPUT:
   MIN_SIZE_TEST: 0

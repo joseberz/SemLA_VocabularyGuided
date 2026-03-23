@@ -1,4 +1,5 @@
 _BASE_: ../cityscapes_base.yaml
+DOMAIN_NAME: cs-normal
 DATASETS:
   TRAIN: ("cs-normal_sem_seg_train",)
   TEST: ("cs-normal_sem_seg_val",)

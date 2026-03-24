@@ -2,6 +2,7 @@ __pycache__/
 .venv/
 wandb/
 catseg/loradb/
+catseg/loradb_open_clip/
 catseg/output/
 catseg/models/
 catseg/datasets/

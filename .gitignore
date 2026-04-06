@@ -6,4 +6,4 @@ catseg/loradb_open_clip/
 catseg/output/
 catseg/models/
 catseg/datasets/
-results/
+results*/

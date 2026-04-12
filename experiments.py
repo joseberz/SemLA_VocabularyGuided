@@ -22,7 +22,7 @@ EXCLUDE_FROM_HMEAN = ["coconutL"]
 # Define distance measure mappings
 NAME_MEASURE_MAPPING = {
     "euclidean": lambda u, v: 1. / scipy.spatial.distance.euclidean(u.squeeze(), v.squeeze()),
-    "cosine": lambda u, v: scipy.spatial.distance.cosine(u.squeeze(), v.squeeze()),
+    "cosine": lambda u, v: 1. - scipy.spatial.distance.cosine(u.squeeze(), v.squeeze()),
 }
 
 def load_domains_from_yaml(file_path: str) -> List[str]:
@@ -211,7 +211,7 @@ def parse_args():
     parser.add_argument(
         "--voc_distance_method",
         type=str,
-        choices=["none", "global", "patch"],
+        choices=["none", "global", "patch", "objectdetection"],
         default="none"
     )
     
@@ -231,7 +231,7 @@ def main():
     # Load config if provided
     semla_config = load_config_from_yaml(args.semla_config) if args.semla_config else {}
 
-    orchestrator = DomainOrchestrator(source_domains)
+    orchestrator = DomainOrchestrator(source_domains, args.voc_distance_method)
     
     # Run the specified experiment
     if args.experiment == "zeroshot":

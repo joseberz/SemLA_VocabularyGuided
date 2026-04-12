@@ -16,6 +16,7 @@ from torch import nn
 import peft
 
 from .embedding import EmbeddingManager, VocabEmbeddingMethod
+from .object_detection import ObjectDetector
 
 logging.disable()
 
@@ -142,8 +143,18 @@ class DomainObserver:
         # Die Vokabulardistanz ist viel höher als die ursprüngliche Distanz
         #similarities_norm = min_max_normalize(np.array([s[1] for s in similarities], dtype=float))
         #voc_similarities_norm = min_max_normalize(np.array([s[1] for s in voc_similarities], dtype=float))
-        similarities_norm = np.array([s[1] for s in similarities], dtype=float)
-        voc_similarities_norm = np.array([s[1] for s in voc_similarities], dtype=float)
+        raw_sim = np.array([s[1] for s in similarities], dtype=float)
+        raw_voc_sims = np.array([s[1] for s in voc_similarities], dtype=float)
+
+        similarities_norm = raw_sim / (raw_sim.sum() + 1e-8)
+        voc_similarities_norm = raw_voc_sims / (raw_voc_sims.sum() + 1e-8)
+
+        print(raw_sim)
+        print(raw_voc_sims)
+        print("=====================")
+        print(similarities_norm)
+        print(voc_similarities_norm)
+
         similarities_combined = gamma * similarities_norm + (1 - gamma) * voc_similarities_norm
 
         # Array wieder in Form [['acdc-fog' <dist>]] bringen
@@ -178,6 +189,7 @@ class DomainObserver:
         min_dists_per_vocab = np.max(distance_matrix, axis=0)  # shape (M_a,)
         top_q_dists = np.sort(min_dists_per_vocab)[-top_q:]     # shape (Q,)
         dist_adapter_bild = np.mean(top_q_dists)               # sum * (1/Q)
+        #dist_adapter_bild = 0
         return dist_bild_adapter + dist_adapter_bild
 
     """
@@ -197,6 +209,7 @@ class DomainOrchestrator:
     def __init__(
         self,
         domains: list[str],
+        vocab_embedding_method: VocabEmbeddingMethod,
         lora_db_path: Union[str, Path] = "loradb/",
         embedding_manager: EmbeddingManager = EmbeddingManager(),
     ) -> None:
@@ -223,6 +236,10 @@ class DomainOrchestrator:
         self.lora_db_path: Path = Path(lora_db_path)
 
         self.embedding_manager = embedding_manager
+
+        self.object_detector = None
+        if vocab_embedding_method == VocabEmbeddingMethod.OBJECTDETECTION.value:
+            self.object_detector = ObjectDetector()
 
         self.current_model = None
 
@@ -652,7 +669,7 @@ class DomainOrchestrator:
         gamma: float = 0.5,
         top_q: int = 5
     ) -> tuple[dict[str, float], dict[str, float]]:
-        
+
         from detectron2.evaluation import inference_context, SemSegEvaluator
         from contextlib import ExitStack
 
@@ -691,6 +708,25 @@ class DomainOrchestrator:
 
                     current_embedding, current_vocab_embedding = self.embedding_manager.embed_image(input_path, vocab_embedding_method)
 
+                    if vocab_embedding_method == VocabEmbeddingMethod.OBJECTDETECTION.value:
+                        with torch.no_grad():
+                            result_objects = self.object_detector.detect_objects(input_path)
+                            detected_classes = []
+                            boxes = result_objects[0].boxes
+                            for i in range(len(boxes)):
+                                class_id = int(boxes.cls[i].item())
+                                detected_classes.append(result_objects[0].names[class_id])
+                        del result_objects
+                        del boxes
+
+                        detected_classes = list(set(detected_classes))
+                        print(detected_classes)
+                        # Falls die Objektdetection nichts erkennt, bleiben die patch embeddings als Zielvokabular vorhanden
+                        if len(detected_classes) != 0:
+                            current_vocab_embedding = self.embedding_manager.embed_text(detected_classes)
+
+                        print(current_vocab_embedding.shape)
+
                     weight_dict, merged_adpater_name = self._merge(
                         target_domain=current_target_domain,
                         remove_target_adapter=remove_target_adapter,
@@ -706,6 +742,10 @@ class DomainOrchestrator:
                         gamma=gamma,
                         top_q=top_q
                     )
+                    del current_vocab_embedding
+                    del current_embedding
+                    torch.cuda.synchronize()  # warten bis alle CUDA ops fertig sind
+                    torch.cuda.empty_cache()
 
                     for domain, weight in weight_dict.items():
                         weights.setdefault(domain, []).append(weight)

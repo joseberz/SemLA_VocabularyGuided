@@ -27,6 +27,7 @@ class VocabEmbeddingMethod(Enum):
     NONE = "none"
     GLOBAL = "global"
     PATCH = "patch"
+    OBJECTDETECTION = "objectdetection"
 
 def filter_patches_by_area(patch_embeddings, n_clusters=16, min_area_pct=0.05, use_centroids=True):
     clustering = AgglomerativeClustering(
@@ -42,7 +43,9 @@ def filter_patches_by_area(patch_embeddings, n_clusters=16, min_area_pct=0.05, u
         area_pct = mask.sum() / len(labels)
         if area_pct >= min_area_pct:
             if use_centroids:
-                filtered.append(patch_embeddings[mask].mean(axis=0, keepdims=True))
+                centroid = patch_embeddings[mask].mean(axis=0)
+                centroid = centroid / (np.linalg.norm(centroid) + 1e-8)
+                filtered.append(centroid[np.newaxis, :])
             else:
                 filtered.append(patch_embeddings[mask])
 
@@ -119,33 +122,17 @@ class ClipEmbeddingModel(EmbeddingModel):
             # Global
             cls_output = vision_outputs.pooler_output                          # (1, 1024)
             cls_output = self.embedding_model.visual_projection(cls_output)    # (1, 768)
-            cls_output = cls_output / cls_output.norm(dim=-1, keepdim=True)
+            #cls_output = cls_output / cls_output.norm(dim=-1, keepdim=True)
 
             # Patch
             patch_features = self._value_store['patches'].squeeze(0)
-            patch_features = self.embedding_model.visual_projection(patch_features)  # (256, 768)
-            patch_embeddings = patch_features / patch_features.norm(dim=-1, keepdim=True)
-            # Kleine Cluster rausfiltern
+            patch_features = self.embedding_model.visual_projection(patch_features)
+            patch_features = patch_features / patch_features.norm(dim=-1, keepdim=True)
             patch_embeddings = patch_features.detach().cpu().numpy()
-            patch_embeddings = filter_patches_by_area(patch_embeddings, n_clusters=16, min_area_pct=0.05)
-            #patch_embeddings = None
-            #if vocab_embedding_method == VocabEmbeddingMethod.PATCH.value:
-            #    patch_embeddings = vision_outputs.last_hidden_state[:, 1:, :]  # (1, 256, 1024)
-            #    patch_embeddings = patch_embeddings.squeeze(0)  # (256, 1024)
+            # TODO Irrelevante Patches herausfiltern ?
+            # patch_embeddings = filter_patches_by_area(patch_embeddings, n_clusters=16, min_area_pct=0.05)
 
-                # Top-N Patches nach Norm behalten
-                # TODO Patch Embeddings mit versch. Methoden reduzieren!!
-            #    norms = torch.norm(patch_embeddings, dim=-1)
-            #    top_n = 32  # Hyperparameter
-            #    top_indices = torch.topk(norms, top_n).indices
-            #    patch_embeddings = patch_embeddings[top_indices]
-
-            #    patch_embeddings = self.embedding_model.visual_projection(patch_embeddings)  # (256, 768)
-            #    patch_embeddings = patch_embeddings / patch_embeddings.norm(dim=-1, keepdim=True)
-            #    patch_embeddings = patch_embeddings.detach().cpu().numpy()
-        print(cls_output.shape)
-        print(patch_embeddings.shape)
-        return cls_output.detach().cpu().numpy(), patch_embeddings
+        return cls_output.squeeze(0).detach().cpu().numpy(), patch_embeddings
 
     def embed_text(self, text) -> npt.NDArray:
         """Embed a single text."""
@@ -156,7 +143,21 @@ class ClipEmbeddingModel(EmbeddingModel):
             text_embeddings = text_embeddings / text_embeddings.norm(dim=-1, keepdim=True)
             text_embeddings = text_embeddings.mean(dim=0)
             text_embeddings = text_embeddings / text_embeddings.norm()
-        return text_embeddings
+        return text_embeddings.detach().cpu().numpy()
+
+    def embed_texts_batched(self, texts: list[str]) -> npt.NDArray:
+        """Embed alle Texte in einem einzigen Forward Pass."""
+        all_templated = [t.format(text) for text in texts for t in templates]
+
+        with torch.no_grad():
+            inputs = self.tokenizer(all_templated, padding=True, return_tensors="pt").to("cuda")
+            embs = self.embedding_model.get_text_features(**inputs)
+            embs = embs / embs.norm(dim=-1, keepdim=True)
+        embs = embs.detach().cpu().numpy()
+        # Pro Klasse die 5 Templates mitteln
+        embs = embs.reshape(len(texts), len(templates), -1).mean(axis=1)
+        embs = embs / np.linalg.norm(embs, axis=-1, keepdims=True)
+        return embs
 
 """
 NEU: Test von OpenClip als Embedding Modell!
@@ -240,10 +241,10 @@ class EmbeddingManager:
     """
     NEU: Text embeddings generieren
     """
-    def embed_text(self, text) -> npt.NDArray:
+    def embed_text(self, texts: list[str]) -> npt.NDArray:
         """Embed a text."""
         # TODO kann bei Python eine Methode überladen werden? Z.B. eine Methode die str annimmt und eine andere die Liste annimmt ?
-        return self.embedding_model.embed_text(text)
+        return self.embedding_model.embed_texts_batched(texts)
 
     """
     NEU: Vocabulary embeddings für Datensätze generieren und abspeichern

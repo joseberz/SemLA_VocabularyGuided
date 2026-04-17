@@ -122,7 +122,7 @@ class ClipEmbeddingModel(EmbeddingModel):
             # Global
             cls_output = vision_outputs.pooler_output                          # (1, 1024)
             cls_output = self.embedding_model.visual_projection(cls_output)    # (1, 768)
-            #cls_output = cls_output / cls_output.norm(dim=-1, keepdim=True)
+            cls_output = cls_output / cls_output.norm(dim=-1, keepdim=True) # TODO Zeile evtl wieder rückgängig machen!!
 
             # Patch
             patch_features = self._value_store['patches'].squeeze(0)
@@ -259,15 +259,14 @@ class EmbeddingManager:
             return np.load(save_path)["vocab_embeddings"]
 
         print(f"Computing vocab embeddings for {domain_name} ...")
-        all_class_embeddings = []
-        for classname in classnames:
-            embeddings = self.embed_text(classname)
-            all_class_embeddings.append(embeddings)
-        all_class_embeddings = torch.stack(all_class_embeddings) # (N, dim)
 
-        np.savez(save_path, vocab_embeddings=all_class_embeddings.cpu().numpy())
+
+        all_class_embeddings = self.embedding_model.embed_texts_batched(classnames)  # schon numpy (N, 768)
+        print(all_class_embeddings.shape)
+        np.savez(save_path, vocab_embeddings=all_class_embeddings)
         torch.cuda.empty_cache()
         return all_class_embeddings
+
 
     def get_vocabulary_embeddings(self, domain_name, domain_path, classnames):
         print(f"Embedding vocabulary for dataset '{domain_name}' ...")

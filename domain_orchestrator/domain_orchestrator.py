@@ -1,3 +1,4 @@
+import json
 import time
 from typing import Union, Dict, Callable, List
 from typing import Any, Literal, Mapping
@@ -16,7 +17,7 @@ from torch import nn
 import peft
 
 from .embedding import EmbeddingManager, VocabEmbeddingMethod
-from .object_detection import ObjectDetector
+from .object_detection import ObjectDetector, ADAPTER_VOCAB_JSONS
 
 logging.disable()
 
@@ -682,6 +683,11 @@ class DomainOrchestrator:
             
             current_target_domain = self._target_domains[current_target_domain_name]
 
+            with open(ADAPTER_VOCAB_JSONS[current_target_domain_name]) as f:
+                target_domain_class_names = json.load(f)
+                target_domain_class_names = [class_name.lower() for class_name in target_domain_class_names]
+                print(f"Target Domain Klassen: {target_domain_class_names}")
+
             self._set_current_target_domain(
                 current_target_domain,
             )
@@ -720,12 +726,14 @@ class DomainOrchestrator:
                         del boxes
 
                         detected_classes = list(set(detected_classes))
-                        print(detected_classes)
+
                         # Falls die Objektdetection nichts erkennt, bleiben die patch embeddings als Zielvokabular vorhanden
                         if len(detected_classes) != 0:
                             current_vocab_embedding = self.embedding_manager.embed_text(detected_classes)
 
-                        print(current_vocab_embedding.shape)
+                        main_list = list(set(detected_classes) - set(target_domain_class_names))
+                        if main_list is not None:
+                            print(f"Domänenfremde Klasse gefunden: {main_list}")
 
                     weight_dict, merged_adpater_name = self._merge(
                         target_domain=current_target_domain,

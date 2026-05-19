@@ -24,4 +24,5 @@ from . import (
     register_nyudv2,
     register_coco_stuff,
     register_coco_panoptic_annos_semseg,
+    register_novel_eval
 )

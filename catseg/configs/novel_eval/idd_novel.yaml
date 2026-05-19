@@ -1,0 +1,16 @@
+_BASE_: ../vitb_384.yaml
+MODEL:
+  SEM_SEG_HEAD:
+    NUM_CLASSES: 32
+    TRAIN_CLASS_JSON: "datasets/idd30_novel.json"
+    TEST_CLASS_JSON: "datasets/idd30_novel.json"
+DATASETS:
+  TRAIN: ("iddnovel_sem_seg_val",)
+  TEST: ("iddnovel_sem_seg_val",)
+TEST:
+  SLIDING_WINDOW: True
+  IMS_PER_BATCH: 1
+INPUT:
+  MIN_SIZE_TEST: 1080
+  MAX_SIZE_TEST: 1920
+SEED: 1000

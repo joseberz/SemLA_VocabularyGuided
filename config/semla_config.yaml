@@ -1,4 +1,4 @@
-similarity_measure_name: cosine
+similarity_measure_name: euclidean
 temperature: 0.01
 top_k: 7
 combination_type: cat

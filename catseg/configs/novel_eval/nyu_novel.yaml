@@ -1,0 +1,16 @@
+_BASE_: ../vitb_384.yaml
+MODEL:
+  SEM_SEG_HEAD:
+    NUM_CLASSES: 6 # TODO
+    TRAIN_CLASS_JSON: "datasets/nyu40_novel.json" # TODO
+    TEST_CLASS_JSON: "datasets/nyu40_novel.json" # TODO
+DATASETS:
+  TRAIN: ("nyunovel_sem_seg_val",) # TODO
+  TEST: ("nyunovel_sem_seg_val",) # TODO
+TEST:
+  SLIDING_WINDOW: True
+  IMS_PER_BATCH: 1
+INPUT:
+  MIN_SIZE_TEST: 1080 # todo
+  MAX_SIZE_TEST: 1920 # todo
+SEED: 1000

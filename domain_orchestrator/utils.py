@@ -1,7 +1,6 @@
 from argparse import Namespace
 
 import logging
-import os
 from typing import Literal
 
 DETECTRON2_DATASET_PATH = "/home/joshi/Desktop/HSB/SemLA_VocabularyGuided/catseg/datasets/"
@@ -44,7 +43,10 @@ def get_domain_args(
         "idd",
         "pc59",
         "nyu",
-        "coconutL"
+        "coconutL",
+        "iddnovel",
+        "nyunovel",
+        "pc59novel"
     }
 
     CS_DOMAIN_CHECK = {"normal", "rain"}
@@ -110,7 +112,10 @@ def get_domain_args(
         "idd": "configs/idd/idd.yaml",
         'pc59': 'configs/pc59/pc59.yaml',
         'nyu': 'configs/nyu/nyu.yaml',
-        'coconutL': 'configs/coconutL/coconutL.yaml'
+        'coconutL': 'configs/coconutL/coconutL.yaml',
+        "iddnovel": "configs/novel_eval/idd_novel.yaml",
+        "nyunovel": "configs/novel_eval/nyu_novel.yaml",
+        "pc59novel": "configs/novel_eval/pc59_novel.yaml",
     }
 
     datasets = {
@@ -159,6 +164,18 @@ def get_domain_args(
         "coconutL": {
             "train": f"{ALT_PFAD}coco/train2017/",
             "val": f"{ALT_PFAD}coco/val2017/",
+        },
+        "iddnovel": {
+            "train": f"{DETECTRON2_DATASET_PATH}IDD_novel/image/",
+            "val":   f"{DETECTRON2_DATASET_PATH}IDD_novel/image/",
+        },
+        "nyunovel": {
+            "train": f"{DETECTRON2_DATASET_PATH}NYU_novel/image/",
+            "val":   f"{DETECTRON2_DATASET_PATH}NYU_novel/image/",
+        },
+        "pc59novel": {
+            "train": f"{DETECTRON2_DATASET_PATH}PC59_novel/image/",
+            "val":   f"{DETECTRON2_DATASET_PATH}PC59_novel/image/",
         },
     }
 

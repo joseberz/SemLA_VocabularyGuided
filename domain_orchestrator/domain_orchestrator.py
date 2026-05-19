@@ -1,6 +1,6 @@
 import json
 import time
-from typing import Union, Dict, Callable, List
+from typing import Union, Dict, Callable, List, Tuple
 from typing import Any, Literal, Mapping
 from pathlib import Path
 from argparse import Namespace
@@ -16,6 +16,7 @@ from torch import nn
 
 import peft
 
+from catseg.NovelSemSegEvaluator import NovelSemSegEvaluator
 from .embedding import EmbeddingManager, VocabEmbeddingMethod
 from .object_detection import ObjectDetector, ADAPTER_VOCAB_JSONS
 
@@ -45,6 +46,34 @@ def z_score_normalize(x):
         return np.zeros_like(x)
     return (x - x.mean()) / x.std()
 
+def compute_per_image_miou(pred_mask: np.ndarray, gt_mask: np.ndarray) -> float:
+    """Berechnet mIoU für ein einzelnes Bild über alle vorhandenen GT-Klassen."""
+
+    # resize wenn nötig
+    if pred_mask.shape != gt_mask.shape:
+        from PIL import Image
+        pred_mask = np.array(
+            Image.fromarray(pred_mask.astype(np.int32)).resize(
+                (gt_mask.shape[1], gt_mask.shape[0]),
+                resample=Image.NEAREST  # NEAREST interpolation
+            )
+        )
+
+    classes = np.unique(gt_mask)
+    classes = classes[classes != 255]  # ignore_label rausfiltern
+    if len(classes) == 0:
+        return float("nan")
+
+    ious = []
+    for cls in classes:
+        pred_cls = pred_mask == cls
+        gt_cls   = gt_mask == cls
+        intersection = np.logical_and(pred_cls, gt_cls).sum()
+        union        = np.logical_or(pred_cls, gt_cls).sum()
+        if union > 0:
+            ious.append(intersection / union)
+
+    return float(np.mean(ious))
 
 @dataclass
 class Domain:
@@ -113,7 +142,7 @@ class DomainObserver:
             target_vocab_embedding: npt.NDArray | None = None,
             top_q: int = 5,
             gamma: float = 0.5
-    ) -> Dict[str, float]:
+    ) -> Tuple[Dict[str, float], Dict[str, float], Dict[str, float]]:
         """
         Calculate the similarity between the target embedding and the domain prototypes.
         """
@@ -150,12 +179,6 @@ class DomainObserver:
         similarities_norm = raw_sim / (raw_sim.sum() + 1e-8)
         voc_similarities_norm = raw_voc_sims / (raw_voc_sims.sum() + 1e-8)
 
-        print(raw_sim)
-        print(raw_voc_sims)
-        print("=====================")
-        print(similarities_norm)
-        print(voc_similarities_norm)
-
         similarities_combined = gamma * similarities_norm + (1 - gamma) * voc_similarities_norm
 
         # Array wieder in Form [['acdc-fog' <dist>]] bringen
@@ -164,9 +187,21 @@ class DomainObserver:
             for i in range(len(similarities))
         ]
 
+        vis_similarities = [
+            [similarities[i][0],raw_sim[i]]
+            for i in range(len(similarities))
+        ]
+
+        voc_similarities = [
+            [similarities[i][0],raw_voc_sims[i]]
+            for i in range(len(similarities))
+        ]
+
         # sort similarities from lowest to highest
         similarities_dict = dict(sorted(similarities_combined, key=lambda x: x[1], reverse=sort_descending))
-        return similarities_dict
+        vis_similarities = dict(sorted(vis_similarities, key=lambda x: x[1], reverse=sort_descending))
+        voc_similarities = dict(sorted(voc_similarities, key=lambda x: x[1], reverse=sort_descending))
+        return similarities_dict, vis_similarities, voc_similarities
 
     @staticmethod
     def calculate_vocabulary_similarity(
@@ -396,7 +431,7 @@ class DomainOrchestrator:
                 current_target_domain,
             )
 
-            weight_dict, merged_adpater_name = self._merge(
+            weight_dict, merged_adpater_name, _, _ = self._merge(
                 current_target_domain,
                 remove_target_adapter,
                 mode,
@@ -446,7 +481,7 @@ class DomainOrchestrator:
         target_vocab_embedding=None,
         top_q: int = 5,
         gamma: float = 0.5
-    ) -> tuple[dict[str, float], str]:
+    ) -> tuple[dict[str, float], str, Dict[str, float], Dict[str, float]]:
         """
         Merge the source domains and benchmark the merged adapter on the target domain.
         """
@@ -458,12 +493,34 @@ class DomainOrchestrator:
                 domain
                 for _, domain in self._source_domains.items() if domain.name != target_domain.name
             ]
+            # TODO schöner machen..
+            source_domains = [
+                domain
+                for domain in source_domains if domain.name != "nyunovel" and domain.name != "iddnovel" and domain.name != "pc59novel"
+            ]
+            if target_domain.name == "nyunovel":
+                source_domains = [
+                    domain
+                    for domain in source_domains if domain.name != "nyu"
+                ]
+            if target_domain.name == "iddnovel":
+                source_domains = [
+                    domain
+                    for domain in source_domains if domain.name != "idd"
+                ]
+            if target_domain.name == "pc59novel":
+                source_domains = [
+                    domain
+                    for domain in source_domains if domain.name != "pc59"
+                ]
         else:
             source_domains = [
                 domain
                 for _, domain in self._source_domains.items()
             ]
 
+        voc_distance = None
+        vis_distance = None
         if mode == "uniform":
 
             weights = [1 / len(source_domains) for _ in range(len(source_domains))]
@@ -489,8 +546,9 @@ class DomainOrchestrator:
                     similarity_measure=similarity_measure,
                     sort_descending=sort_descending
                 )
+                vis_distance = similarity_mapping
             else:
-                similarity_mapping = self.observer.calculate_similarity_to_domains_voc_distance(
+                similarity_mapping, vis_distance, voc_distance = self.observer.calculate_similarity_to_domains_voc_distance(
                     embedding=target_embedding,
                     domains=source_domains,
                     similarity_measure=similarity_measure,
@@ -531,7 +589,7 @@ class DomainOrchestrator:
         print(f"Setting {merged_name} as the active adapter.\n")
         self.current_model.set_adapter(merged_name)
 
-        return domain_weight_mapping, merged_name
+        return domain_weight_mapping, merged_name, vis_distance, voc_distance
 
     def _merge_adapters(
         self,
@@ -574,6 +632,8 @@ class DomainOrchestrator:
         res = result_dict["sem_seg"].get("IoU", None)
         if res is None:
             res = result_dict["sem_seg"].get("mIoU")
+        if res is None:
+            res = result_dict["sem_seg"].get("mIoU-All-Classes")
         return res
 
 
@@ -668,8 +728,9 @@ class DomainOrchestrator:
         vocab_embedding_method: VocabEmbeddingMethod = VocabEmbeddingMethod.NONE,
         sort_descending: bool = True,
         gamma: float = 0.5,
-        top_q: int = 5
-    ) -> tuple[dict[str, float], dict[str, float]]:
+        top_q: int = 5,
+        save_per_image_log: bool = False,
+    ) -> tuple[dict[str, float], dict[str, float], list[dict[str, float] | None]]:
 
         from detectron2.evaluation import inference_context, SemSegEvaluator
         from contextlib import ExitStack
@@ -735,7 +796,7 @@ class DomainOrchestrator:
                         if main_list is not None:
                             print(f"Domänenfremde Klasse gefunden: {main_list}")
 
-                    weight_dict, merged_adpater_name = self._merge(
+                    weight_dict, merged_adpater_name, vis_distance, voc_distance = self._merge(
                         target_domain=current_target_domain,
                         remove_target_adapter=remove_target_adapter,
                         mode="centroid", 
@@ -755,18 +816,44 @@ class DomainOrchestrator:
                     torch.cuda.synchronize()  # warten bis alle CUDA ops fertig sind
                     torch.cuda.empty_cache()
 
-                    for domain, weight in weight_dict.items():
-                        weights.setdefault(domain, []).append(weight)
+                    if isinstance(evaluator, NovelSemSegEvaluator):
+                        present_class = Path(input_path).parent.name
+                        if present_class not in weights:
+                            weights[present_class] = {}
+                        for domain, weight in weight_dict.items():
+                            weights[present_class].setdefault(domain, []).append(weight)
+                    else:
+                        for domain, weight in weight_dict.items():
+                            weights.setdefault(domain, []).append(weight)
 
                     model = self.current_model
                     with torch.no_grad():
                         outputs = model(inputs)
+                        pred_mask = outputs[0]["sem_seg"].argmax(dim=0).cpu().numpy()
+                        gt_mask   = inputs[0]["sem_seg"].numpy()
+                        img_miou  = compute_per_image_miou(pred_mask, gt_mask)
+
+                        # Logging für Korrelationsanalyse
+                        if not hasattr(self, "_correlation_log"):
+                            self._correlation_log = []
+
+                        if save_per_image_log:
+                            self._correlation_log.append({
+                                "image_path":         input_path,
+                                "domain":             current_target_domain_name,
+                                "adapter_weights":    {k: float(v) for k, v in weight_dict.items()},
+                                "adapter_distance_visual": vis_distance,
+                                "adapter_distance_vocabulary": voc_distance,
+                                "per_image_miou":     img_miou,
+                                "vocab_method":       vocab_embedding_method if isinstance(vocab_embedding_method, str) else vocab_embedding_method.value,
+                            })
 
                     if torch.cuda.is_available():
                         torch.cuda.synchronize()
 
-                    if isinstance(evaluator, SemSegEvaluator):
+                    if isinstance(evaluator, SemSegEvaluator) or isinstance(evaluator, NovelSemSegEvaluator):
                         _ = evaluator.process(inputs, outputs)
+                        print(_)
                     else:
                         _ = evaluator.process_image(inputs, outputs)
 
@@ -777,7 +864,10 @@ class DomainOrchestrator:
             result = self._get_result_from_dict(result_dict)
             print(f"Result for domain '{current_target_domain.name}': {result}\n")
 
-            results.update({current_target_domain.name: result})
+            if isinstance(evaluator, NovelSemSegEvaluator):
+                results.update({current_target_domain.name: result_dict["sem_seg"]})
+            else:
+                results.update({current_target_domain.name: result})
 
             if not isinstance(evaluator, SemSegEvaluator):
                 evaluator._working_dir.cleanup()
@@ -788,4 +878,4 @@ class DomainOrchestrator:
         if vocab_embedding_method != VocabEmbeddingMethod.NONE.value:
             self.observer.print_similarity_stats()
 
-        return results, weights
+        return results, weights, self._correlation_log

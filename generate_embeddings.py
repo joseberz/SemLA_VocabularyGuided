@@ -5,7 +5,6 @@ import json
 import argparse
 from catseg.train_net import setup
 from domain_orchestrator.utils import get_domain_args
-from domain_orchestrator.embedding import OpenClipEmbeddingModel
 
 DETECTRON2_DATASET_PATH = os.getenv("DETECTRON2_DATASETS")
 
@@ -27,19 +26,10 @@ if __name__ == "__main__":
     # Path to the lora library where the statistics will be stored
     parser.add_argument("--lora_library_path", type=str, required=True)
 
-    # NEU: welches CLIP soll genutzt werden?
-    parser.add_argument(
-        "--clip_source",
-        type=str,
-        required=True,
-        choices=["open_clip", "huggingface"],
-    )
-
     # Parse arguments
     args = parser.parse_args()
     source_domains_file = Path(args.source_domains_file)
     lora_library_path = Path(args.lora_library_path)
-    clip_source = args.clip_source
 
     with open(source_domains_file, "r") as f:
         source_domains = yaml.safe_load(f)
@@ -58,12 +48,7 @@ if __name__ == "__main__":
 
         if embedding_manager is None:
             from domain_orchestrator import embedding
-            if clip_source == "huggingface":
-                embedding_manager = embedding.EmbeddingManager()
-            elif clip_source == "open_clip":
-                embedding_manager = embedding.EmbeddingManager(OpenClipEmbeddingModel())
-            else:
-                raise ValueError(f"Invalid clip source: {clip_source}")
+            embedding_manager = embedding.EmbeddingManager()
 
         domain_path = lora_library_path / Path(domain_name)
 

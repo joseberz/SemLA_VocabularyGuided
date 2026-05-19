@@ -11,8 +11,6 @@ import numpy as np
 import numpy.typing as npt
 import torch
 from PIL import Image
-import open_clip
-from domain_orchestrator.open_clip.model import VisionTransformer
 
 # Erklärung im Paper warum Templates https://arxiv.org/abs/2103.00020
 templates = [
@@ -74,12 +72,16 @@ class EmbeddingModel:
 
 
 class ClipEmbeddingModel(EmbeddingModel):
-    """Handles image and dataset embedding operations."""
+    """
+    TODO Doku
+    Referenz: Zhou et al., "Extract Free Dense Labels from CLIP" (ECCV 2022)
+    """
 
-    def __init__(self):
+    def __init__(self, device: str = "cuda"):
+        self.device = device
         self.embedding_model = CLIPModel.from_pretrained(
             "openai/clip-vit-large-patch14"
-        ).to("cuda")
+        ).to(self.device)
         self.embedding_processor = CLIPProcessor.from_pretrained(
             "openai/clip-vit-large-patch14"
         )
@@ -88,19 +90,44 @@ class ClipEmbeddingModel(EmbeddingModel):
         )
 
         # --- Hook: Value-Features der letzten ViT-Layer abgreifen ---
-        last_attn = self.embedding_model.vision_model.encoder.layers[-1].self_attn
-        self._value_store = {}
+        # TODO DOKU
 
-        def _hook(module, args, kwargs, output):
-            hidden = kwargs['hidden_states']       # ← statt args[0]
+        last_layer = self.embedding_model.vision_model.encoder.layers[-1]
+        last_attn = last_layer.self_attn
+        self._value_store: dict[str, torch.Tensor] = {}
+
+        def _hook(module: torch.nn.Module, args: tuple, kwargs: dict, output: Any) -> None:
+            hidden = kwargs.get('hidden_states')
+            if hidden is None:
+                hidden = args[0]
+
+            # MaskCLIP angelehnt
             v = module.v_proj(hidden)
-            v = last_attn.out_proj(v)
+            v = module.out_proj(v)
+
+            # patches sind alle tokens AUßER dem CLS Token (Index 0)
+            # shape ist (batch, num_patches, hidden_dim)
             self._value_store['patches'] = v[:, 1:]
 
-        hook = last_attn.register_forward_hook(_hook, with_kwargs=True)
+        self._hook_handle = last_attn.register_forward_hook(
+            _hook, with_kwargs=True
+        )
 
-    def embed_image(self, image_path, vocab_embedding_method=None) -> tuple[Any, Any | None]:
-        """Embed a single image."""
+    def embed_image_original(self, image_path: str) -> npt.NDArray:
+        """Gibt das globale Bild-Embedding zurück aberNICHT normalisiert (wie SemLA)."""
+        image = Image.open(image_path).convert("RGB")
+        inputs = self.embedding_processor(images=image, return_tensors="pt").to(self.device)
+        with torch.no_grad():
+            image_embeddings = (
+                self.embedding_model.get_image_features(**inputs)
+                .detach().cpu().numpy()
+            )
+        return image_embeddings  # nicht normalisiert
+
+    def embed_image(self, image_path, vocab_embedding_method=None) -> tuple[npt.NDArray, npt.NDArray]:
+        """
+        TODO DOKU
+        """
         try:
             image = Image.open(image_path).convert("RGB")
         except FileNotFoundError:
@@ -111,28 +138,44 @@ class ClipEmbeddingModel(EmbeddingModel):
             raise
 
         if self.embedding_processor is None or self.embedding_model is None:
-            print("Error: CLIP model or processor is not initialized.")
-            raise
-        
-        inputs = self.embedding_processor(images=image, return_tensors="pt").to("cuda")
+            raise RuntimeError("CLIP model or processor is not initialized.")
+
+        inputs = self.embedding_processor(
+            images=image, return_tensors="pt"
+        ).to(self.device)
 
         with torch.no_grad():
+            # Ein einzelner forward pass durch das Vision-Model
+            # Der hook fängt dabei automatisch die patch eatures ab.
             vision_outputs = self.embedding_model.vision_model(**inputs)
-            # Hole die Globalen Embeddings und die Patch Embeddings aus dem selben Forward Pass
-            # Global
-            cls_output = vision_outputs.pooler_output                          # (1, 1024)
-            cls_output = self.embedding_model.visual_projection(cls_output)    # (1, 768)
-            cls_output = cls_output / cls_output.norm(dim=-1, keepdim=True) # TODO Zeile evtl wieder rückgängig machen!!
 
-            # Patch
+            # --- Globales Embedding ---
+            # TODO Doku
+            pooled = vision_outputs.pooler_output
+            global_embedding = self.embedding_model.visual_projection(pooled)
+            global_embedding = global_embedding / global_embedding.norm(
+                dim=-1, keepdim=True
+            )
+
+            # --- Patch-Embeddings  ---
+            # TODO Doku
             patch_features = self._value_store['patches'].squeeze(0)
-            patch_features = self.embedding_model.visual_projection(patch_features)
-            patch_features = patch_features / patch_features.norm(dim=-1, keepdim=True)
-            patch_embeddings = patch_features.detach().cpu().numpy()
-            # TODO Irrelevante Patches herausfiltern ?
-            # patch_embeddings = filter_patches_by_area(patch_embeddings, n_clusters=16, min_area_pct=0.05)
+            patch_embeddings = self.embedding_model.visual_projection(
+                patch_features
+            )
+            patch_embeddings = patch_embeddings / patch_embeddings.norm(
+                dim=-1, keepdim=True
+            )
+            # TODO Evtl hier die Anzahl der Patches bereits reduzieren?
 
-        return cls_output.squeeze(0).detach().cpu().numpy(), patch_embeddings
+        global_np = global_embedding.detach().cpu().numpy()
+        patches_np = patch_embeddings.detach().cpu().numpy()
+
+        return global_np, patches_np
+
+    def __del__(self):
+        if hasattr(self, '_hook_handle'):
+            self._hook_handle.remove()
 
     def embed_text(self, text) -> npt.NDArray:
         """Embed a single text."""
@@ -159,72 +202,6 @@ class ClipEmbeddingModel(EmbeddingModel):
         embs = embs / np.linalg.norm(embs, axis=-1, keepdims=True)
         return embs
 
-"""
-NEU: Test von OpenClip als Embedding Modell!
-"""
-class OpenClipEmbeddingModel(EmbeddingModel):
-    """Handles image and dataset embedding operations."""
-
-    def __init__(self):
-        self.pretrained_model, _, preprocess = open_clip.create_model_and_transforms('ViT-L-14-quickgelu', pretrained='openai')
-        # Visual in separates CUDA-Modell laden
-        state_dict = self.pretrained_model.visual.state_dict()
-        self.embedding_model = VisionTransformer(
-            image_size=224,
-            patch_size=14,
-            width=1024,
-            layers=24,
-            heads=16,
-            mlp_ratio=4.0,
-            output_dim=768,
-        ).to("cpu")
-        self.embedding_model.load_state_dict(state_dict)
-        del state_dict
-
-        # Visual aus pretrained_model entfernen, wird nicht mehr gebraucht
-        self.pretrained_model.visual = None
-        self.pretrained_model = self.pretrained_model.to("cpu")
-
-        self.embedding_processor = preprocess
-        self.tokenizer = open_clip.get_tokenizer("ViT-L-14-quickgelu")
-
-    def embed_image(self, image_path) -> npt.NDArray:
-        """Embed a single image."""
-        try:
-            image = Image.open(image_path).convert("RGB")
-        except FileNotFoundError:
-            print(f"Error: Image file '{image_path}' not found.")
-            raise
-        except Exception as e:
-            print(f"Error opening image '{image_path}': {e}")
-            raise
-
-        if self.embedding_processor is None or self.embedding_model is None:
-            print("Error: CLIP model or processor is not initialized.")
-            raise
-
-        inputs = self.embedding_processor(image).unsqueeze(0).to("cpu")
-
-        # Generate image embeddings
-        with torch.no_grad():
-            image_embeddings = (
-                self.embedding_model(inputs).detach().cpu().numpy()
-            )
-        del inputs
-        torch.cuda.empty_cache()
-        return image_embeddings
-
-    def embed_text(self, text) -> npt.NDArray:
-        """Embed a single text."""
-        with torch.no_grad():
-            texts = [t.format(text) for t in templates]
-            inputs = self.tokenizer(texts).to("cpu")
-            text_embeddings = self.pretrained_model.encode_text(inputs)
-            text_embeddings = text_embeddings / text_embeddings.norm(dim=-1, keepdim=True)
-            text_embeddings = text_embeddings.mean(dim=0)
-            text_embeddings = text_embeddings / text_embeddings.norm()
-        return text_embeddings
-
 
 class EmbeddingManager:
     """Handles image and dataset embedding operations."""
@@ -236,7 +213,11 @@ class EmbeddingManager:
     
     def embed_image(self, image_path, vocab_embedding_method=None) -> npt.NDArray:
         """Embed a single image."""
-        return self.embedding_model.embed_image(image_path, vocab_embedding_method=vocab_embedding_method)
+        if vocab_embedding_method == VocabEmbeddingMethod.NONE.value:
+            return self.embedding_model.embed_image_original(image_path), None
+        nonnormalized_global_embed = self.embedding_model.embed_image_original(image_path)
+        normalized_global_embed, patch_embeds = self.embedding_model.embed_image(image_path)
+        return normalized_global_embed, patch_embeds
 
     """
     NEU: Text embeddings generieren

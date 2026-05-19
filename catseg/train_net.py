@@ -67,9 +67,10 @@ from detectron2.data import get_detection_dataset_dicts, DatasetMapper, DatasetF
 from detectron2.data.build import trivial_batch_collator
 from detectron2.data.samplers import InferenceSampler
 
-from .LossEvalHook import LossEvalHook
-from .data_utils import build_custom_test_loader
-from .LossEvalHook import AccumLRScheduler
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from LossEvalHook import LossEvalHook
+from data_utils import build_custom_test_loader
+from LossEvalHook import AccumLRScheduler
 from detectron2.engine import hooks
 from detectron2.utils.events import TensorboardXWriter, get_event_storage
 
@@ -770,6 +771,13 @@ class Trainer(DefaultTrainer):
                 torch.cuda.device_count() >= comm.get_rank()
             ), "ACDCEvaluator currently do not work with multiple machines."
             return MUSESSemSegEvaluator(dataset_name)
+        if evaluator_type == "novel_sem_seg":
+            from catseg.NovelSemSegEvaluator import NovelSemSegEvaluator
+            return NovelSemSegEvaluator(
+                         dataset_name,
+                         distributed=True,
+                         output_dir=output_folder,
+                     )
         if len(evaluator_list) == 0:
             raise NotImplementedError(
                 "no Evaluator for the dataset {} with the type {}".format(

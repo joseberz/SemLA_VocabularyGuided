@@ -8,3 +8,5 @@ catseg/models/
 catseg/datasets/
 visualization/plots/
 results*/
+
+cross_vocab_dataset/cross_vocab_dataset_*

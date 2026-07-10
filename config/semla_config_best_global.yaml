@@ -1,0 +1,7 @@
+similarity_measure_name: euclidean
+temperature: TODO
+top_k: TODO
+combination_type: TODO
+top_q: TODO
+gamma: TODO
+top_q_frac: TODO

@@ -1,0 +1,7 @@
+similarity_measure_name: euclidean
+temperature: 0.04895776134049645
+top_k: 9
+combination_type: cat
+top_q: 6
+gamma: 0.6195644373941668
+top_q_frac: 0.15

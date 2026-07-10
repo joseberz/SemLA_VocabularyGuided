@@ -6,8 +6,9 @@ MaskFormer Training Script.
 
 This script is a simplified version of the training script in detectron2/tools.
 """
-
+import contextlib
 import copy
+import io
 import itertools
 import logging
 import os
@@ -275,13 +276,21 @@ class CityscapesSemSegEvaluator(CityscapesSemSegEvaluator):
                 cityscapes_eval.args.groundTruthSearch
             )
             predictionImgList = []
+            filtered_gt = []
             for gt in groundTruthImgList:
-                predictionImgList.append(cityscapes_eval.getPrediction(cityscapes_eval.args, gt))
+                try:
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        pred = cityscapes_eval.getPrediction(cityscapes_eval.args, gt)
+                    predictionImgList.append(pred)
+                    filtered_gt.append(gt)
+                except SystemExit:
+                    pass
+
             results = cityscapes_eval.evaluateImgLists(
-                predictionImgList, groundTruthImgList, cityscapes_eval.args
+                predictionImgList, filtered_gt, cityscapes_eval.args
             )
             ret = OrderedDict()
-            for pred_path, gt_path in zip(predictionImgList, groundTruthImgList):
+            for pred_path, gt_path in zip(predictionImgList, filtered_gt):
                 results = cityscapes_eval.evaluateImgLists(
                     [pred_path], [gt_path], cityscapes_eval.args
                 )
@@ -373,12 +382,19 @@ class ACDCSemSegEvaluator(CityscapesEvaluator):
             cityscapes_eval.args.groundTruthSearch
         )
         predictionImgList = []
+        filtered_gt = []
         for gt in groundTruthImgList:
-            predictionImgList.append(
-                cityscapes_eval.getPrediction(cityscapes_eval.args, gt)
-            )
+            # nur GT-Bilder evaluieren für die auch eine Prediction existiert
+            # Ermöglicht Subset-Evaluierung
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    pred = cityscapes_eval.getPrediction(cityscapes_eval.args, gt)
+                predictionImgList.append(pred)
+                filtered_gt.append(gt)
+            except SystemExit:
+                pass
         results = cityscapes_eval.evaluateImgLists(
-            predictionImgList, groundTruthImgList, cityscapes_eval.args
+            predictionImgList, filtered_gt, cityscapes_eval.args
         )
         ret = OrderedDict()
         ret["sem_seg"] = {
@@ -472,12 +488,17 @@ class MUSESSemSegEvaluator(ACDCSemSegEvaluator):
             cityscapes_eval.args.groundTruthSearch
         )
         predictionImgList = []
+        filtered_gt = []
         for gt in groundTruthImgList:
-            predictionImgList.append(
-                cityscapes_eval.getPrediction(cityscapes_eval.args, gt)
-            )
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    pred = cityscapes_eval.getPrediction(cityscapes_eval.args, gt)
+                predictionImgList.append(pred)
+                filtered_gt.append(gt)
+            except SystemExit:
+                pass
         results = cityscapes_eval.evaluateImgLists(
-            predictionImgList, groundTruthImgList, cityscapes_eval.args
+            predictionImgList, filtered_gt, cityscapes_eval.args
         )
         ret = OrderedDict()
         ret["sem_seg"] = {
@@ -565,10 +586,18 @@ class ResizedCityscapesSemSegEvaluator(CityscapesSemSegEvaluator):
             cityscapes_eval.args.groundTruthSearch
         )
         predictionImgList = []
+        filtered_gt = []
         for gt in groundTruthImgList:
-            predictionImgList.append(cityscapes_eval.getPrediction(cityscapes_eval.args, gt))
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    pred = cityscapes_eval.getPrediction(cityscapes_eval.args, gt)
+                predictionImgList.append(pred)
+                filtered_gt.append(gt)
+            except SystemExit:
+                pass
+
         results = cityscapes_eval.evaluateImgLists(
-            predictionImgList, groundTruthImgList, cityscapes_eval.args
+            predictionImgList, filtered_gt, cityscapes_eval.args
         )
         ret = OrderedDict()
         ret["sem_seg"] = {

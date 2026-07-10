@@ -27,41 +27,11 @@ class VocabEmbeddingMethod(Enum):
     PATCH = "patch"
     OBJECTDETECTION = "objectdetection"
 
-def filter_patches_by_area(patch_embeddings, n_clusters=16, min_area_pct=0.05, use_centroids=True):
-    clustering = AgglomerativeClustering(
-        n_clusters=n_clusters,
-        metric='cosine',
-        linkage='average'
-    )
-    labels = clustering.fit_predict(patch_embeddings)
-
-    filtered = []
-    for c in range(n_clusters):
-        mask = labels == c
-        area_pct = mask.sum() / len(labels)
-        if area_pct >= min_area_pct:
-            if use_centroids:
-                centroid = patch_embeddings[mask].mean(axis=0)
-                centroid = centroid / (np.linalg.norm(centroid) + 1e-8)
-                filtered.append(centroid[np.newaxis, :])
-            else:
-                filtered.append(patch_embeddings[mask])
-
-    if len(filtered) == 0:
-        # Fallback: größten Cluster nehmen
-        largest = np.argmax([np.sum(labels == c) for c in range(n_clusters)])
-        mask = labels == largest
-        if use_centroids:
-            return patch_embeddings[mask].mean(axis=0, keepdims=True)
-        return patch_embeddings[mask]
-
-    return np.concatenate(filtered)
-
 #abstract class
 class EmbeddingModel:
     """Abstract class for embedding models."""
     @abstractmethod
-    def embed_image(self, image_path, vocab_embedding_method=None):
+    def embed_image(self, image_path):
         """Embed a single image."""
         pass
 
@@ -114,7 +84,7 @@ class ClipEmbeddingModel(EmbeddingModel):
         )
 
     def embed_image_original(self, image_path: str) -> npt.NDArray:
-        """Gibt das globale Bild-Embedding zurück aberNICHT normalisiert (wie SemLA)."""
+        """Gibt das globale Bild-Embedding zurück aber NICHT normalisiert (wie SemLA)."""
         image = Image.open(image_path).convert("RGB")
         inputs = self.embedding_processor(images=image, return_tensors="pt").to(self.device)
         with torch.no_grad():
@@ -124,7 +94,14 @@ class ClipEmbeddingModel(EmbeddingModel):
             )
         return image_embeddings  # nicht normalisiert
 
-    def embed_image(self, image_path, vocab_embedding_method=None) -> tuple[npt.NDArray, npt.NDArray]:
+    def embed_image_dispatch(self, image_path, vocab_embedding_method):
+        if vocab_embedding_method is VocabEmbeddingMethod.NONE:
+            raw_embed = self.embed_image_original(image_path)
+            norm_embed = raw_embed / np.linalg.norm(raw_embed)
+            return norm_embed, raw_embed, None
+        return self.embed_image(image_path)
+
+    def embed_image(self, image_path) -> tuple[Any, Any, Any]:
         """
         TODO DOKU
         """
@@ -153,6 +130,8 @@ class ClipEmbeddingModel(EmbeddingModel):
             # TODO Doku
             pooled = vision_outputs.pooler_output
             global_embedding = self.embedding_model.visual_projection(pooled)
+
+            raw_global = global_embedding.detach().cpu().numpy()
             global_embedding = global_embedding / global_embedding.norm(
                 dim=-1, keepdim=True
             )
@@ -160,6 +139,7 @@ class ClipEmbeddingModel(EmbeddingModel):
             # --- Patch-Embeddings  ---
             # TODO Doku
             patch_features = self._value_store['patches'].squeeze(0)
+            patch_features = self.embedding_model.vision_model.post_layernorm(patch_features)
             patch_embeddings = self.embedding_model.visual_projection(
                 patch_features
             )
@@ -171,7 +151,7 @@ class ClipEmbeddingModel(EmbeddingModel):
         global_np = global_embedding.detach().cpu().numpy()
         patches_np = patch_embeddings.detach().cpu().numpy()
 
-        return global_np, patches_np
+        return global_np, raw_global, patches_np
 
     def __del__(self):
         if hasattr(self, '_hook_handle'):
@@ -210,14 +190,11 @@ class EmbeddingManager:
         if embedding_model is None:
             embedding_model = ClipEmbeddingModel()
         self.embedding_model = embedding_model
-    
-    def embed_image(self, image_path, vocab_embedding_method=None) -> npt.NDArray:
+
+    def embed_image(self, image_path, vocab_embedding_method=VocabEmbeddingMethod.NONE) -> tuple:
         """Embed a single image."""
-        if vocab_embedding_method == VocabEmbeddingMethod.NONE.value:
-            return self.embedding_model.embed_image_original(image_path), None
-        nonnormalized_global_embed = self.embedding_model.embed_image_original(image_path)
-        normalized_global_embed, patch_embeds = self.embedding_model.embed_image(image_path)
-        return normalized_global_embed, patch_embeds
+        normalized_global, raw_global, patch_embeds = self.embedding_model.embed_image_dispatch(image_path, vocab_embedding_method)
+        return normalized_global, raw_global, patch_embeds
 
     """
     NEU: Text embeddings generieren
@@ -273,9 +250,9 @@ class EmbeddingManager:
             return []
 
         for img in image_files:
-            embedding, _ = self.embed_image(img) # TODO testen, könnte Probleme machen
-            if embedding is not None:
-                dataset_embeddings.append(embedding)
+            _, embedding_raw, _ = self.embed_image(img, vocab_embedding_method=VocabEmbeddingMethod.NONE)
+            if embedding_raw is not None:
+                dataset_embeddings.append(embedding_raw)
             else:
                 raise ValueError(f"Error embedding image '{img}'.")
 

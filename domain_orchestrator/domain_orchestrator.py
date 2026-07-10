@@ -5,11 +5,13 @@ from typing import Any, Literal, Mapping
 from pathlib import Path
 from argparse import Namespace
 from dataclasses import dataclass
+from enum import Enum
 import logging
 import os
 
 import numpy as np
 import numpy.typing as npt
+import scipy
 
 import torch
 from torch import nn
@@ -26,6 +28,13 @@ torch.set_float32_matmul_precision("high")
 
 from .utils import custom_domain_args, get_domain_args, benchmark_catseg, load_catseg_model
 
+# Normalization methods as Enums
+# Are used in calculate_similarity_to_domains_voc_distance to
+# normalize original SemLA distance and the new vocabulary distance
+class NormalizationMethod(Enum):
+    L1 = "l1"
+    ZSCORE = "zscore"
+    MINMAX = "minmax"
 
 def softmax(x: list[float], softmax_temperature) -> np.ndarray:
     """Compute softmax values for each sets of scores in x."""
@@ -46,7 +55,24 @@ def z_score_normalize(x):
         return np.zeros_like(x)
     return (x - x.mean()) / x.std()
 
-def compute_per_image_miou(pred_mask: np.ndarray, gt_mask: np.ndarray) -> float:
+def l1_normalize(x):
+    s = x.sum()
+    if s == 0:
+        return np.ones_like(x) / len(x)
+    return x / s
+
+# Dispatch function for the normalization methods
+def normalize_scores(x: np.ndarray, method: NormalizationMethod) -> np.ndarray:
+    if method == NormalizationMethod.L1:
+        return l1_normalize(x)
+    elif method == NormalizationMethod.ZSCORE:
+        return z_score_normalize(x)
+    elif method == NormalizationMethod.MINMAX:
+        return min_max_normalize(x)
+    else:
+        raise ValueError(f"Unknown normalization method: {method}")
+
+def compute_miou(pred_mask: np.ndarray, gt_mask: np.ndarray, domain_name: str) -> Tuple[float, Dict[int, float], List[int]]:
     """Berechnet mIoU für ein einzelnes Bild über alle vorhandenen GT-Klassen."""
 
     # resize wenn nötig
@@ -60,20 +86,36 @@ def compute_per_image_miou(pred_mask: np.ndarray, gt_mask: np.ndarray) -> float:
         )
 
     classes = np.unique(gt_mask)
-    classes = classes[classes != 255]  # ignore_label rausfiltern
+    # ignore_label rausfiltern
+    if domain_name == "mv":
+        classes = classes[classes != 255]
+    else:
+        classes = classes[classes != 65]
     if len(classes) == 0:
         return float("nan")
 
     ious = []
+    per_class_iou = {}
     for cls in classes:
         pred_cls = pred_mask == cls
         gt_cls   = gt_mask == cls
         intersection = np.logical_and(pred_cls, gt_cls).sum()
         union        = np.logical_or(pred_cls, gt_cls).sum()
         if union > 0:
-            ious.append(intersection / union)
+            class_iou = intersection / union
+            per_class_iou[int(cls)] = {"miou": class_iou, "intersection": intersection, "union": union}
+            ious.append(class_iou)
 
-    return float(np.mean(ious))
+    return float(np.mean(ious)), per_class_iou, classes.tolist()
+
+@dataclass
+class ImageEmbedding:
+    raw: npt.NDArray
+    norm: npt.NDArray
+
+    def get_embedding(self, normalize: bool) -> npt.NDArray:
+        """returns either the normalized or raw embedding."""
+        return self.norm if normalize else self.raw
 
 @dataclass
 class Domain:
@@ -95,7 +137,7 @@ class DomainObserver:
         self,
     ) -> None:
         self.domain_prototypes = {}
-        self.domain_vocab_embeddings = {} # NEU
+        self.domain_vocab_embeddings = {}
         self._debug_similarities_A = []
         self._debug_similarities_B = []
 
@@ -141,7 +183,10 @@ class DomainObserver:
             vocab_embedding_method: VocabEmbeddingMethod = VocabEmbeddingMethod.GLOBAL,
             target_vocab_embedding: npt.NDArray | None = None,
             top_q: int = 5,
-            gamma: float = 0.5
+            gamma: float = 0.5,
+            normalization_method: NormalizationMethod = NormalizationMethod.L1,
+            embedding_norm: npt.NDArray | None = None,
+            top_q_frac: float | None = None,
     ) -> Tuple[Dict[str, float], Dict[str, float], Dict[str, float]]:
         """
         Calculate the similarity between the target embedding and the domain prototypes.
@@ -155,12 +200,13 @@ class DomainObserver:
             similarity = similarity_measure(embedding, prot)
             similarities.append([domain.name, similarity])
 
-            # Vokabulardistanz (NEU)
+            # Vokabulardistanz
+            #similarity = similarity_measure(patch_centroid, vocab_centroid)
             vocab_embeddings = self.domain_vocab_embeddings[domain.name]
-            if vocab_embedding_method != VocabEmbeddingMethod.GLOBAL.value:
-                similarity = self.calculate_vocabulary_similarity(target_vocab_embedding, similarity_measure, vocab_embeddings, vocab_embedding_method, top_q)
+            if vocab_embedding_method is not VocabEmbeddingMethod.GLOBAL:
+                similarity = self.calculate_vocabulary_similarity(target_vocab_embedding, similarity_measure, vocab_embeddings, top_q, top_q_frac)
             else:
-                similarity = self.calculate_vocabulary_similarity([embedding], similarity_measure, vocab_embeddings, vocab_embedding_method, top_q)
+                similarity = self.calculate_vocabulary_similarity([embedding_norm], similarity_measure, vocab_embeddings, top_q, top_q_frac)
             voc_similarities.append([domain.name, similarity])
 
         similarities = similarities
@@ -169,17 +215,22 @@ class DomainObserver:
         self._debug_similarities_A.extend([s[1] for s in similarities])
         self._debug_similarities_B.extend([s[1] for s in voc_similarities])
 
-        # TODO Normalisierungsmöglichkeiten prüfen!!
-        # Die Vokabulardistanz ist viel höher als die ursprüngliche Distanz
-        #similarities_norm = min_max_normalize(np.array([s[1] for s in similarities], dtype=float))
-        #voc_similarities_norm = min_max_normalize(np.array([s[1] for s in voc_similarities], dtype=float))
         raw_sim = np.array([s[1] for s in similarities], dtype=float)
         raw_voc_sims = np.array([s[1] for s in voc_similarities], dtype=float)
 
-        similarities_norm = raw_sim / (raw_sim.sum() + 1e-8)
-        voc_similarities_norm = raw_voc_sims / (raw_voc_sims.sum() + 1e-8)
+        print(raw_sim)
+        print(raw_voc_sims)
 
-        similarities_combined = gamma * similarities_norm + (1 - gamma) * voc_similarities_norm
+        # TODO testen min-max dann l1
+        similarities_norm_minmax = normalize_scores(raw_sim, NormalizationMethod.MINMAX)
+        voc_similarities_minmax = normalize_scores(raw_voc_sims, NormalizationMethod.MINMAX)
+
+        similarities_norm = normalize_scores(similarities_norm_minmax, normalization_method)
+        voc_similarities_norm = normalize_scores(voc_similarities_minmax, normalization_method)
+
+        combined = gamma * similarities_norm + (1 - gamma) * voc_similarities_norm
+
+        similarities_combined = combined
 
         # Array wieder in Form [['acdc-fog' <dist>]] bringen
         similarities_combined = [
@@ -206,26 +257,29 @@ class DomainObserver:
     @staticmethod
     def calculate_vocabulary_similarity(
             embedding: List[npt.NDArray],
-            similarity_measure: Callable[[npt.NDArray, npt.NDArray], np.float64],
             vocab_embeddings: List[npt.NDArray],
-            vocab_embedding_method: VocabEmbeddingMethod = VocabEmbeddingMethod.GLOBAL,
-            top_q: int = 5
+            top_q: int = 5,
+            top_q_frac: float | None = None,
     ) -> np.float64:
+        similarity_measure = lambda u, v: 1. - scipy.spatial.distance.cosine(u.squeeze(), v.squeeze())
         distance_matrix = np.zeros((len(embedding), len(vocab_embeddings)))
         for i, emb in enumerate(embedding):
             for j, vocab_emb in enumerate(vocab_embeddings):
                 distance_matrix[i][j] = similarity_measure(emb, vocab_emb)
 
-        # Da 1 / Euklid_Distanz muss hier immer das Maximum in der Matrix gefunden werden
-        # Bild -> Adapter Distanz
-        min_dists_bild_adapter = np.max(distance_matrix, axis=1) # shape: (i,)
+        min_dists_bild_adapter = np.max(distance_matrix, axis=1)
         dist_bild_adapter = np.mean(min_dists_bild_adapter)
-        # Adapter -> Bild Distanz
-        # TODO für Patch: 256 Embeddings meventuell reduzeiren
-        min_dists_per_vocab = np.max(distance_matrix, axis=0)  # shape (M_a,)
-        top_q_dists = np.sort(min_dists_per_vocab)[-top_q:]     # shape (Q,)
-        dist_adapter_bild = np.mean(top_q_dists)               # sum * (1/Q)
-        #dist_adapter_bild = 0
+
+        min_dists_per_vocab = np.max(distance_matrix, axis=0)
+        n_classes = len(vocab_embeddings)
+
+        # TODO Doku warum das hier so gemacht wird
+        if top_q_frac is not None:
+            q = max(1, min(round(top_q_frac * n_classes), n_classes))
+        else:
+            q = min(top_q, n_classes)
+        top_q_dists = np.sort(min_dists_per_vocab)[-q:]
+        dist_adapter_bild = np.mean(top_q_dists)
         return dist_bild_adapter + dist_adapter_bild
 
     """
@@ -248,6 +302,12 @@ class DomainOrchestrator:
         vocab_embedding_method: VocabEmbeddingMethod,
         lora_db_path: Union[str, Path] = "loradb/",
         embedding_manager: EmbeddingManager = EmbeddingManager(),
+        normalize_centroids: bool = True,
+        subset_fraction: float = 1.0,
+        subset_seed: int = 42,
+        val_test_split: float = 0.0,
+        val_test_seed: int = 123,
+        use_val_portion: bool = True,
     ) -> None:
         
         # TODO: Currently, to use catseg for experiments, we need to change the directory to the catseg directory
@@ -272,6 +332,14 @@ class DomainOrchestrator:
         self.lora_db_path: Path = Path(lora_db_path)
 
         self.embedding_manager = embedding_manager
+
+        self.normalize_centroids = normalize_centroids
+
+        self._subset_fraction = subset_fraction
+        self._subset_seed = subset_seed
+        self._val_test_split = val_test_split
+        self._val_test_seed = val_test_seed
+        self._use_val_portion = use_val_portion
 
         self.object_detector = None
         if vocab_embedding_method == VocabEmbeddingMethod.OBJECTDETECTION.value:
@@ -356,7 +424,14 @@ class DomainOrchestrator:
         source_domains = {}
 
         for source_domain_name in source_domain_names:
-            args, evaluator, data_loader = get_domain_args(source_domain_name, split=split)
+            args, evaluator, data_loader = get_domain_args(
+                source_domain_name, split=split,
+                subset_fraction=self._subset_fraction,
+                subset_seed=self._subset_seed,
+                val_test_split=self._val_test_split if split == "val" else 0.0,
+                val_test_seed=self._val_test_seed,
+                use_val_portion=self._use_val_portion,
+            )
             source_domains.update(
                 {
                     source_domain_name: self._add_domain(
@@ -396,6 +471,12 @@ class DomainOrchestrator:
         train_average_embedding: npt.NDArray = statistics[
             "train_average_embedding"
         ]
+
+        if self.normalize_centroids:
+            norm = np.linalg.norm(train_average_embedding)
+            if norm > 0:
+                train_average_embedding = train_average_embedding / norm
+            print(f"Normalized centroid for '{domain_name}'.")
 
         domain = Domain(
             domain_name,
@@ -469,7 +550,7 @@ class DomainOrchestrator:
         target_domain: Domain,
         remove_target_adapter: bool,
         mode: Literal["uniform", "centroid"],
-        target_embedding=None,
+        target_embedding: ImageEmbedding | None = None,
         softmax_temperature: int | None = 0.05,
         top_k: int = 5,  # number of domains to merge
         combination_type: str = "cat",
@@ -480,7 +561,9 @@ class DomainOrchestrator:
         vocab_embedding_method: VocabEmbeddingMethod = VocabEmbeddingMethod.NONE,
         target_vocab_embedding=None,
         top_q: int = 5,
-        gamma: float = 0.5
+        gamma: float = 0.5,
+        normalization_method: NormalizationMethod = NormalizationMethod.L1,
+        top_q_frac: float | None = None
     ) -> tuple[dict[str, float], str, Dict[str, float], Dict[str, float]]:
         """
         Merge the source domains and benchmark the merged adapter on the target domain.
@@ -539,9 +622,9 @@ class DomainOrchestrator:
             )
 
         elif mode == "centroid":
-            if vocab_embedding_method == VocabEmbeddingMethod.NONE.value:
+            if vocab_embedding_method is VocabEmbeddingMethod.NONE:
                 similarity_mapping = self.observer.calculate_similarity_to_domains(
-                    embedding=target_embedding,
+                    embedding=target_embedding.get_embedding(self.normalize_centroids),
                     domains=source_domains,
                     similarity_measure=similarity_measure,
                     sort_descending=sort_descending
@@ -549,14 +632,17 @@ class DomainOrchestrator:
                 vis_distance = similarity_mapping
             else:
                 similarity_mapping, vis_distance, voc_distance = self.observer.calculate_similarity_to_domains_voc_distance(
-                    embedding=target_embedding,
+                    embedding=target_embedding.get_embedding(self.normalize_centroids),
                     domains=source_domains,
                     similarity_measure=similarity_measure,
                     sort_descending=sort_descending,
                     vocab_embedding_method=vocab_embedding_method,
                     target_vocab_embedding=target_vocab_embedding,
                     top_q=top_q,
-                    gamma=gamma
+                    gamma=gamma,
+                    normalization_method=normalization_method,
+                    embedding_norm=target_embedding.norm,  # For GLOBAL Voc distance
+                    top_q_frac=top_q_frac
                 )
 
             k_closest_names = list(similarity_mapping.keys())[: top_k]
@@ -730,6 +816,8 @@ class DomainOrchestrator:
         gamma: float = 0.5,
         top_q: int = 5,
         save_per_image_log: bool = False,
+        normalization_method: NormalizationMethod = NormalizationMethod.L1,
+        top_q_frac: float | None = None,
     ) -> tuple[dict[str, float], dict[str, float], list[dict[str, float] | None]]:
 
         from detectron2.evaluation import inference_context, SemSegEvaluator
@@ -744,11 +832,6 @@ class DomainOrchestrator:
             
             current_target_domain = self._target_domains[current_target_domain_name]
 
-            with open(ADAPTER_VOCAB_JSONS[current_target_domain_name]) as f:
-                target_domain_class_names = json.load(f)
-                target_domain_class_names = [class_name.lower() for class_name in target_domain_class_names]
-                print(f"Target Domain Klassen: {target_domain_class_names}")
-
             self._set_current_target_domain(
                 current_target_domain,
             )
@@ -762,7 +845,7 @@ class DomainOrchestrator:
             # https://github.com/facebookresearch/detectron2/blob/2a420edb307c9bdf640f036d3b196bed474b8593/detectron2/evaluation/evaluator.py#L103
 
             evaluator.reset()
-            with ExitStack() as stack:
+            with (ExitStack() as stack):
                 if isinstance(model, nn.Module):
                     stack.enter_context(inference_context(model))
                 stack.enter_context(torch.no_grad())
@@ -773,9 +856,17 @@ class DomainOrchestrator:
 
                     print(f"Predicting image: {input_path}")
 
-                    current_embedding, current_vocab_embedding = self.embedding_manager.embed_image(input_path, vocab_embedding_method)
+                    current_embedding_norm, current_embedding_raw, current_patch_embedding = self.embedding_manager.embed_image(input_path, vocab_embedding_method)
 
-                    if vocab_embedding_method == VocabEmbeddingMethod.OBJECTDETECTION.value:
+                    current_embedding = ImageEmbedding(raw=current_embedding_raw, norm=current_embedding_norm)
+
+
+                    if vocab_embedding_method is VocabEmbeddingMethod.OBJECTDETECTION:
+                        with open(ADAPTER_VOCAB_JSONS[current_target_domain_name]) as f:
+                            target_domain_class_names = json.load(f)
+                            target_domain_class_names = [class_name.lower() for class_name in target_domain_class_names]
+                            print(f"Target Domain Klassen: {target_domain_class_names}")
+
                         with torch.no_grad():
                             result_objects = self.object_detector.detect_objects(input_path)
                             detected_classes = []
@@ -790,7 +881,7 @@ class DomainOrchestrator:
 
                         # Falls die Objektdetection nichts erkennt, bleiben die patch embeddings als Zielvokabular vorhanden
                         if len(detected_classes) != 0:
-                            current_vocab_embedding = self.embedding_manager.embed_text(detected_classes)
+                            current_patch_embedding = self.embedding_manager.embed_text(detected_classes)
 
                         main_list = list(set(detected_classes) - set(target_domain_class_names))
                         if main_list is not None:
@@ -807,12 +898,17 @@ class DomainOrchestrator:
                         similarity_measure=similarity_measure,
                         sort_descending=sort_descending,
                         vocab_embedding_method=vocab_embedding_method,
-                        target_vocab_embedding=current_vocab_embedding,
+                        target_vocab_embedding=current_patch_embedding,
                         gamma=gamma,
-                        top_q=top_q
+                        top_q=top_q,
+                        normalization_method=normalization_method,
+                        top_q_frac=top_q_frac
                     )
-                    del current_vocab_embedding
+                    del current_patch_embedding
                     del current_embedding
+                    del current_embedding_norm
+                    if current_embedding_raw is not None:
+                        del current_embedding_raw
                     torch.cuda.synchronize()  # warten bis alle CUDA ops fertig sind
                     torch.cuda.empty_cache()
 
@@ -831,20 +927,31 @@ class DomainOrchestrator:
                         outputs = model(inputs)
                         pred_mask = outputs[0]["sem_seg"].argmax(dim=0).cpu().numpy()
                         gt_mask   = inputs[0]["sem_seg"].numpy()
-                        img_miou  = compute_per_image_miou(pred_mask, gt_mask)
 
                         # Logging für Korrelationsanalyse
                         if not hasattr(self, "_correlation_log"):
                             self._correlation_log = []
 
                         if save_per_image_log:
+                            img_miou, class_mious, gt_class_ids = compute_miou(pred_mask, gt_mask, current_target_domain_name)
+
+                            # IDs kriegen über Klassennamen über die Metadata des Evaluators.
+                            # TODO prüfen ob das für jeden Evaluator funktioniert
+                            stuff_classes = getattr(evaluator, "_class_names", None)
+                            if stuff_classes is None:
+                                meta_data = getattr(evaluator, "_metadata", None)
+                                stuff_classes = getattr(meta_data, "stuff_classes", None)
+
+                            class_mious_named = {stuff_classes[class_id]: miou for class_id, miou in class_mious.items() if class_id < len(stuff_classes)}
                             self._correlation_log.append({
                                 "image_path":         input_path,
                                 "domain":             current_target_domain_name,
                                 "adapter_weights":    {k: float(v) for k, v in weight_dict.items()},
                                 "adapter_distance_visual": vis_distance,
                                 "adapter_distance_vocabulary": voc_distance,
+                                "gt_ids":             gt_class_ids,
                                 "per_image_miou":     img_miou,
+                                "per_class_miou":     class_mious_named,
                                 "vocab_method":       vocab_embedding_method if isinstance(vocab_embedding_method, str) else vocab_embedding_method.value,
                             })
 
@@ -875,7 +982,7 @@ class DomainOrchestrator:
         total = time.time() - t0
         print(f"Experiment took {total} seconds to complete!")
 
-        if vocab_embedding_method != VocabEmbeddingMethod.NONE.value:
+        if vocab_embedding_method is not VocabEmbeddingMethod.NONE:
             self.observer.print_similarity_stats()
 
         return results, weights, self._correlation_log

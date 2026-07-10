@@ -13,6 +13,11 @@ def get_domain_args(
     base_model_path: str = "models/model_final.pth",
     num_gpus: int = 1,
     get_cofing_only: bool = False,
+    subset_fraction: float = 1.0,
+    subset_seed: int = 42,
+    val_test_split: float = 0.0,
+    val_test_seed: int = 123,
+    use_val_portion: bool = True,   # True = Val-Anteil nutzen für Parameter-Suche und wenn False = Test-Anteil für Evaluation
 ):
     logger_names = ["detectron2", "d2", "fvcore"]
     for name in logger_names:
@@ -228,12 +233,26 @@ def get_domain_args(
         return args
     else:
         from catseg.train_net import Trainer, setup
+        from catseg.data_utils import register_subset_dataset
+        from catseg.data_utils import register_val_test_split
+
+        dataset_name = f"{domain_name}_sem_seg_{split}"
+
+        # Bei Val-Durchläufen und bei Angabe eines splits bzw. einer datenreduzierung, wird der datensatz auf ein Subset reduziert
+        if split == "val" and subset_fraction < 1.0:
+            dataset_name = register_subset_dataset(dataset_name, subset_fraction, subset_seed)
+
+        if split == "val" and val_test_split > 0.0:
+            val_name, test_name = register_val_test_split(
+                dataset_name, val_test_split, val_test_seed
+            )
+            dataset_name = val_name if use_val_portion else test_name
 
         data_loader = Trainer.build_test_loader(
-            setup(args), f"{domain_name}_sem_seg_{split}"
+            setup(args), dataset_name
         )
 
-        evaluator = Trainer.build_evaluator(setup(args), f"{domain_name}_sem_seg_{split}")
+        evaluator = Trainer.build_evaluator(setup(args), dataset_name)
 
         return args, evaluator, data_loader
 

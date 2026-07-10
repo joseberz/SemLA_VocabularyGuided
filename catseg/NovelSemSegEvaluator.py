@@ -22,11 +22,10 @@ class NovelSemSegEvaluator(SemSegEvaluator):
             distributed=distributed,
             output_dir=output_dir,
         )
-        meta = MetadataCatalog.get(dataset_name)
+        self._metadata = MetadataCatalog.get(dataset_name)
 
-        print(meta)
-        self._novel_ids: dict = getattr(meta, "novel_ids", {})
-        self._novel_class_names: list = meta.stuff_classes  # nur die neuen
+        self._novel_ids: dict = getattr(self._metadata, "novel_ids", {})
+        self._novel_class_names: list = self._metadata.stuff_classes  # nur die neuen
         self._novel_class_names: list = [self._novel_class_names[i] for i in self._novel_ids]
 
         print(f"[NovelSemSegEvaluator] dataset={dataset_name}")

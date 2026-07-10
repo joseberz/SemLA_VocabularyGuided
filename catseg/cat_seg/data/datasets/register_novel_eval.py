@@ -16,22 +16,22 @@ logger = logging.getLogger(__name__)
 
 NOVEL_DATASETS = {
     "iddnovel": {
-        "class_names": ["bag", "bench", "flag", "river", "trash can", "umbrella"],
-        "novel_ids": [26, 27, 28, 29, 30, 31, 31],
+        "class_names": ["bag", "bench", "flag", "river", "trash can", "umbrella", "backpack"],
+        "novel_ids": [26, 27, 28, 29, 30, 31, 32],
         "root_subdir": "IDD_novel",
         "img_suffix":  "_leftImg8bit",
         "mask_suffix": "_gtFine_labellevel3Ids.png",
     },
     "nyunovel": {
-        "class_names": ["dog", "cat", "bicycle", "keyboard", "potted plant", "teddy bear"],
-        "novel_ids": [40, 42, 43, 44, 45],
+        "class_names": ["dog", "bicycle", "keyboard", "potted plant", "teddy bear", "dishwasher", "microwave", "trash can"],
+        "novel_ids": [40, 42, 43, 44, 45, 46, 47, 48],
         "root_subdir": "NYU_novel",
         "img_suffix":  None,
         "mask_suffix": None,
     },
     "pc59novel": {
-        "class_names": ["bridge", "fan", "picture", "refrigerator", "traffic light"],
-        "novel_ids": [59, 60, 61, 62, 63],
+        "class_names": ["bridge", "fan", "picture", "refrigerator", "traffic light", "pillow", "rug"],
+        "novel_ids": [59, 60, 61, 62, 63, 64, 65],
         "root_subdir": "PC59_novel",
         "img_suffix":  None,
         "mask_suffix": None,

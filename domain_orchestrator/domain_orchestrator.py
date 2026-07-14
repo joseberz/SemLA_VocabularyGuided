@@ -170,8 +170,18 @@ class DomainObserver:
             similarity = similarity_measure(embedding, prot)
             similarities.append([domain.name, similarity])
 
+        # TODO NUR TEST FÜR ABLATION!
+        raw_sim = np.array([s[1] for s in similarities], dtype=float)
+        similarities_norm_minmax = normalize_scores(raw_sim, NormalizationMethod.MINMAX)
+        similarities_norm = normalize_scores(similarities_norm_minmax, NormalizationMethod.L1)
+        similarities_combined = [
+            [similarities[i][0],similarities_norm[i]]
+            for i in range(len(similarities))
+        ]
         # sort similarities from lowest to highest
-        similarities_dict = dict(sorted(similarities, key=lambda x: x[1], reverse=sort_descending))
+        similarities_dict = dict(sorted(similarities_combined, key=lambda x: x[1], reverse=sort_descending))
+
+        #similarities_dict = dict(sorted(similarities, key=lambda x: x[1], reverse=sort_descending))
         return similarities_dict
 
     def calculate_similarity_to_domains_voc_distance(
@@ -204,9 +214,9 @@ class DomainObserver:
             #similarity = similarity_measure(patch_centroid, vocab_centroid)
             vocab_embeddings = self.domain_vocab_embeddings[domain.name]
             if vocab_embedding_method is not VocabEmbeddingMethod.GLOBAL:
-                similarity = self.calculate_vocabulary_similarity(target_vocab_embedding, similarity_measure, vocab_embeddings, top_q, top_q_frac)
+                similarity = self.calculate_vocabulary_similarity(target_vocab_embedding, vocab_embeddings, top_q, top_q_frac)
             else:
-                similarity = self.calculate_vocabulary_similarity([embedding_norm], similarity_measure, vocab_embeddings, top_q, top_q_frac)
+                similarity = self.calculate_vocabulary_similarity([embedding_norm], vocab_embeddings, top_q, top_q_frac)
             voc_similarities.append([domain.name, similarity])
 
         similarities = similarities
@@ -342,7 +352,7 @@ class DomainOrchestrator:
         self._use_val_portion = use_val_portion
 
         self.object_detector = None
-        if vocab_embedding_method == VocabEmbeddingMethod.OBJECTDETECTION.value:
+        if vocab_embedding_method is VocabEmbeddingMethod.OBJECTDETECTION:
             self.object_detector = ObjectDetector()
 
         self.current_model = None

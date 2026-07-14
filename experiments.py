@@ -177,19 +177,19 @@ def bo_optimize(
     if vocab_embedding_method is VocabEmbeddingMethod.NONE:
         pbounds = {
             "top_k_opt": (5, 11),
-            "temperature_opt": (0.01, 0.15),
+            "temperature_opt": (0.01, 0.2),
         }
     elif vocab_embedding_method is VocabEmbeddingMethod.GLOBAL:
         pbounds = {
             "top_k_opt": (5, 11),
-            "temperature_opt": (0.01, 0.15),
+            "temperature_opt": (0.01, 0.2),
             "gamma_opt": (0.1, 0.9),
         }
     elif vocab_embedding_method is VocabEmbeddingMethod.PATCH or \
             vocab_embedding_method is VocabEmbeddingMethod.OBJECTDETECTION:
         pbounds = {
             "top_k_opt": (5, 11),
-            "temperature_opt": (0.01, 0.15), # falls fail: andere freezen und noch mit 0.1 probieren
+            "temperature_opt": (0.01, 0.2), # falls fail: andere freezen und noch mit 0.1 probieren
             "gamma_opt": (0.1, 0.9),
         }
     else:

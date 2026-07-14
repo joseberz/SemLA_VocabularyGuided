@@ -104,6 +104,23 @@ def uniform_merge(target_domains: List[str],
     )
     save_results(results, weights, output_dir=output_dir)
 
+def qualitative_vocab_expansion(target_domains: List[str], config: Dict[str, Any],
+                                 top_x: int, image_paths: List[str],
+                                 output_dir: str, orchestrator: DomainOrchestrator,
+                                 vocab_embedding_method: VocabEmbeddingMethod,
+                                 normalization_method: NormalizationMethod) -> None:
+    orchestrator.benchmark_semla_qualitative(
+        target_domains=target_domains,
+        top_x=top_x,
+        image_paths=image_paths,
+        output_dir=output_dir,
+        top_k=config.get("top_k", 5),
+        gamma=config.get("gamma", 0.5),
+        top_q=config.get("top_q", 5),
+        vocab_embedding_method=vocab_embedding_method,
+        normalization_method=normalization_method,
+    )
+
 def semla_merge(target_domains: List[str],
                 config: Dict[str, Any], remove_target_adapter: bool, 
                 output_dir: str,
@@ -401,6 +418,7 @@ def parse_args():
                             "bo_optimize",
                             "grid_centroid_ablation",
                             "grid_norm_ablation",
+                            "qualitative_vocab"
                         ],
                         help="Type of experiment to run")
 
@@ -450,6 +468,11 @@ def parse_args():
     parser.add_argument("--eval_on_test", action="store_true",
                         help="if set to true, the test set is used for evaluation")
 
+    # Für qualitative Auswertung mit erweitertem Vokabular
+    parser.add_argument("--top_x", type=int, default=3,
+                        help="Anzahl zusätzlicher Klassen pro gewähltem Adapter")
+    parser.add_argument("--image_list", type=str, required=False,
+                        help="Pfad zu einer txt Datei mit den absoluten Bildpfaden für die qualitative Auswertung")
     return parser.parse_args()
 
 def main():
@@ -565,6 +588,28 @@ def main():
             val_test_seed=args.val_test_seed,
             use_val_portion=args.use_val_portion
         )
+
+    # python experiments.py --experiment qualitative_vocab --voc_distance_method none  --image_list qualitative_images.txt --top_x 3 --output_dir ./results/qual
+    # python experiments.py --experiment qualitative_vocab --voc_distance_method patch --image_list qualitative_images.txt --top_x 3 --output_dir ./results/qual
+    elif args.experiment == "qualitative_vocab":
+        image_paths = None
+        if args.image_list:
+            with open(args.image_list, "r") as f:
+                if args.image_list.endswith((".yaml", ".yml")):
+                    image_paths = yaml.safe_load(f)
+                else:
+                    image_paths = [line.strip() for line in f if line.strip()]
+        orchestrator = DomainOrchestrator(source_domains, voc_method,
+                                          normalize_centroids=args.normalize_centroids,
+                                          subset_fraction=args.subset_fraction,
+                                          subset_seed=args.subset_seed,
+                                          val_test_split=args.val_test_split,
+                                          val_test_seed=args.val_test_seed,
+                                          use_val_portion=args.use_val_portion)
+        qualitative_vocab_expansion(target_domains, semla_config,
+                                    args.top_x, image_paths,
+                                    args.output_dir, orchestrator,
+                                    voc_method, norm_method)
 
 if __name__ == "__main__":
     main()

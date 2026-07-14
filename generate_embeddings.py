@@ -4,19 +4,9 @@ import yaml
 import json
 import argparse
 from catseg.train_net import setup
-from domain_orchestrator.utils import get_domain_args
+from domain_orchestrator.utils import get_domain_args, get_classnames_for_domain
 
 DETECTRON2_DATASET_PATH = os.getenv("DETECTRON2_DATASETS")
-
-def get_classnames_for_domain(domain):
-    # TODO Klassennamen irgendwie anders bekommen, da auf diese Art und Weise zu viel unnötige Logs erstellt werden
-    domain_args = get_domain_args(domain, "val", get_cofing_only=True)
-    cfg = setup(domain_args)
-
-    json_path = cfg.MODEL.SEM_SEG_HEAD.TEST_CLASS_JSON
-
-    with open(json_path) as f:
-        return json.load(f)
 
 if __name__ == "__main__":
     # Argparse

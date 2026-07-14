@@ -26,7 +26,8 @@ logging.disable()
 
 torch.set_float32_matmul_precision("high")
 
-from .utils import custom_domain_args, get_domain_args, benchmark_catseg, load_catseg_model
+from .utils import custom_domain_args, get_domain_args, benchmark_catseg, load_catseg_model, get_classnames_for_domain
+from .vocab_swap import swap_class_vocabulary, restore_class_vocabulary
 
 # Normalization methods as Enums
 # Are used in calculate_similarity_to_domains_voc_distance to
@@ -996,3 +997,154 @@ class DomainOrchestrator:
             self.observer.print_similarity_stats()
 
         return results, weights, self._correlation_log
+
+    def benchmark_semla_qualitative(
+        self,
+        target_domains: list[str],
+        top_x: int,
+        image_paths: list[str],
+        output_dir: str,
+        remove_target_adapter: bool = False,
+        softmax_temperature: float | None = 0.05,
+        top_k: int = 5,
+        combination_type: str = "cat",
+        similarity_measure: Callable = lambda v1, v2: 1 / np.linalg.norm(v1 - v2),
+        vocab_embedding_method: VocabEmbeddingMethod = VocabEmbeddingMethod.GLOBAL,
+        gamma: float = 0.5,
+        top_q: int = 5,
+        normalization_method: NormalizationMethod = NormalizationMethod.L1,
+        top_q_frac: float | None = None,
+    ) -> None:
+        from detectron2.evaluation import inference_context
+        from contextlib import ExitStack
+        import scipy.spatial.distance as spdist
+
+        os.makedirs(output_dir, exist_ok=True)
+
+        for current_target_domain_name in target_domains:
+            current_target_domain = self._target_domains[current_target_domain_name]
+            self._set_current_target_domain(current_target_domain)
+
+            gt_classnames = get_classnames_for_domain(current_target_domain_name)
+            data_loader = current_target_domain.data_loader
+            model = self.current_model
+
+            with ExitStack() as stack:
+                if isinstance(model, nn.Module):
+                    stack.enter_context(inference_context(model))
+                stack.enter_context(torch.no_grad())
+
+                for inputs in data_loader:
+                    input_path = inputs[0]["file_name"]
+
+                    if image_paths is not None and input_path not in image_paths:
+                        continue  # Bild nicht in der handverlesenen Liste, dann überspringen
+                    print(f"Predicting: {input_path}")
+
+                    # Adapterauswahl (wie benchmark_semla)
+                    embedding_norm, embedding_raw, patch_embedding = self.embedding_manager.embed_image(
+                        input_path, vocab_embedding_method
+                    )
+                    current_embedding = ImageEmbedding(raw=embedding_raw, norm=embedding_norm)
+
+                    weight_dict, merged_adapter_name, vis_distance, voc_distance = self._merge(
+                        target_domain=current_target_domain,
+                        remove_target_adapter=remove_target_adapter,
+                        mode="centroid",
+                        target_embedding=current_embedding,
+                        softmax_temperature=softmax_temperature,
+                        top_k=top_k,
+                        combination_type=combination_type,
+                        similarity_measure=similarity_measure,
+                        sort_descending=True,
+                        vocab_embedding_method=vocab_embedding_method,
+                        target_vocab_embedding=patch_embedding,
+                        gamma=gamma,
+                        top_q=top_q,
+                        normalization_method=normalization_method,
+                        top_q_frac=top_q_frac,
+                    )
+
+
+                    # Bei method=NONE: SemLA-Baseline-Segmentierung
+                    # Bei method=PATCH/GLOBAL: Vokabular-Matching-Adapterauswahl, aber noch mit GT-Vokabular
+                    selection_out = self.current_model(inputs)
+                    selection_mask = selection_out[0]["sem_seg"].argmax(dim=0).cpu().numpy()
+
+                    # Vokabular-Erweiterung NUR wenn method != NONE
+                    extended_mask = None
+                    extended_classnames = None
+
+                    if vocab_embedding_method is not VocabEmbeddingMethod.NONE:
+                        extended_classnames = list(gt_classnames)
+                        query_embeddings = patch_embedding if patch_embedding is not None else [embedding_norm]
+
+                        for adapter_name in weight_dict.keys():
+                            adapter_vocab_embeddings = self.observer.domain_vocab_embeddings[adapter_name]
+                            adapter_classnames = get_classnames_for_domain(adapter_name)
+
+                            sims = np.array([
+                                max(1 - spdist.cosine(q.squeeze(), c.squeeze()) for q in query_embeddings)
+                                for c in adapter_vocab_embeddings
+                            ])
+                            top_idx = np.argsort(sims)[-top_x:]
+                            for idx in top_idx:
+                                name = adapter_classnames[idx]
+                                if name not in extended_classnames:
+                                    extended_classnames.append(name)
+
+                        old_vocab = swap_class_vocabulary(self.current_model, extended_classnames)
+                        extended_out = self.current_model(inputs)
+                        extended_mask = extended_out[0]["sem_seg"].argmax(dim=0).cpu().numpy()
+                        restore_class_vocabulary(self.current_model, old_vocab)
+
+                    save_qualitative_result(
+                        image_path=input_path,
+                        vocab_embedding_method=vocab_embedding_method.value,
+                        selection_mask=selection_mask,
+                        selection_classnames=gt_classnames,
+                        extended_mask=extended_mask,
+                        extended_classnames=extended_classnames,
+                        adapter_weights=weight_dict,
+                        output_dir=output_dir,
+                    )
+
+                    self.current_model.delete_adapter(merged_adapter_name)
+                    torch.cuda.synchronize()
+                    torch.cuda.empty_cache()
+
+            print(f"Vokabular-Erweiterung für '{current_target_domain_name}' für qualitative Segmentierungsbeispiele abgeschlossen.")
+
+def classname_to_color(name: str) -> tuple[int, int, int]:
+
+    h = hashlib.md5(name.encode()).hexdigest()
+    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+def colorize_mask(mask: np.ndarray, classnames: list[str]) -> np.ndarray:
+    h, w = mask.shape
+    rgb = np.zeros((h, w, 3), dtype=np.uint8)
+    for idx, name in enumerate(classnames):
+        color = classname_to_color(name)
+        rgb[mask == idx] = color
+    return rgb
+
+def save_qualitative_result(image_path, vocab_embedding_method, selection_mask, selection_classnames,
+                             extended_mask, extended_classnames, adapter_weights, output_dir):
+    stem = Path(image_path).stem
+    prefix = f"{stem}_{vocab_embedding_method}"
+
+    Image.open(image_path).save(f"{output_dir}/{stem}_input.png")
+    Image.fromarray(colorize_mask(selection_mask, selection_classnames)).save(f"{output_dir}/{prefix}_selection.png")
+
+    meta = {
+        "adapter_weights": {k: float(v) for k, v in adapter_weights.items()},
+        "selection_classnames": selection_classnames,
+    }
+
+    if extended_mask is not None:
+        Image.fromarray(colorize_mask(extended_mask, extended_classnames)).save(f"{output_dir}/{prefix}_extended.png")
+        meta["extended_classnames"] = extended_classnames
+        meta["new_classes"] = [c for c in extended_classnames if c not in selection_classnames]
+
+    with open(f"{output_dir}/{prefix}_meta.json", "w") as f:
+        json.dump(meta, f, indent=2)

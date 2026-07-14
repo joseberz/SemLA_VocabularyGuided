@@ -2,9 +2,26 @@ from argparse import Namespace
 
 import logging
 from typing import Literal
+from catseg.train_net import setup
 
 DETECTRON2_DATASET_PATH = "/home/joshi/Desktop/HSB/SemLA_VocabularyGuided/catseg/datasets/"
 ALT_PFAD = "/datasets/"
+
+_classnames_cache: dict[str, list[str]] = {}
+
+def get_classnames_for_domain(domain_name: str) -> list[str]:
+    """Lädt die Klassennamen einer Domäne"""
+    if domain_name in _classnames_cache:
+        return _classnames_cache[domain_name]
+
+    domain_args = get_domain_args(domain_name, "val", get_cofing_only=True)
+    cfg = setup(domain_args)
+    json_path = cfg.MODEL.SEM_SEG_HEAD.TEST_CLASS_JSON
+    with open(json_path) as f:
+        classnames = json.load(f)
+
+    _classnames_cache[domain_name] = classnames
+    return classnames
 
 def get_domain_args(
     domain_name: str,

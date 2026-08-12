@@ -14,7 +14,7 @@ from scipy.stats import hmean
 from domain_orchestrator.domain_orchestrator import DomainOrchestrator, NormalizationMethod
 from domain_orchestrator.embedding import VocabEmbeddingMethod
 
-from bayes_opt import BayesianOptimization
+from bayes_opt import BayesianOptimization, acquisition
 
 EXCLUDE_FROM_HMEAN = ["coconutL"]
 
@@ -25,9 +25,14 @@ NAME_MEASURE_MAPPING = {
 }
 
 # Hyperparameter options for ablation studies
+GRID_GAMMA = [0.0, 0.25, 0.5, 0.75, 1.0]
+GRID_GAMMA_SENSITIVITY = [0.0, 0.25, 0.5, 0.75, 1.0]
 GRID_TOP_K = [5, 7, 9, 12]
-GRID_TAU = [0.001, 0.005, 0.01, 0.05, 0.1]
-GRID_GAMMA = [0.3, 0.5, 0.7]
+GRID_TAU = [0.05, 0.1, 0.3, 0.5]
+#GRID_TAU = [0.001, 0.005, 0.01, 0.05, 0.1]
+
+GRID_TOP_Q_FIXED = []
+GRID_TOP_Q_FRAC = [0.50]
 
 def load_domains_from_yaml(file_path: str) -> List[str]:
     """Load domains from a YAML file."""
@@ -109,7 +114,7 @@ def semla_merge(target_domains: List[str],
                 output_dir: str,
                 orchestrator: DomainOrchestrator,
                 vocab_embedding_method: VocabEmbeddingMethod = VocabEmbeddingMethod.NONE,
-                normalization_method: NormalizationMethod = NormalizationMethod.L1,
+                normalization_method: NormalizationMethod = NormalizationMethod.ZSCORE,
                 ) -> None:
     """Run SemLA experiment (single evaluation, does not optimize)."""
     similarity_measure_name = config.get("similarity_measure_name", "euclidean")
@@ -117,7 +122,7 @@ def semla_merge(target_domains: List[str],
     top_k = config.get("top_k", 5)
     combination_type = config.get("combination_type", "cat")
     top_q = config.get("top_q", 5)
-    top_q_frac = config.get("top_q_frac", None)
+    top_q_frac = config.get("top_q_frac", 0.5)
     gamma = config.get("gamma", 0.5)
 
     results, weights, correlation_log = orchestrator.benchmark_semla(
@@ -137,6 +142,31 @@ def semla_merge(target_domains: List[str],
     save_results(results, weights, correlation_log, output_dir=output_dir)
 
 
+def maximize_with_saving(optimizer, init_points=5, n_iter=25, state_path="optimizer_state.json"):
+    """the out of the box maximize() method does not allow saving inbetween iterations.
+    this function implements this functionality."""
+    optimizer.logger.log_optimization_start(optimizer._space.keys)
+
+    optimizer._prime_queue(init_points)
+
+    iteration = 0
+    while optimizer._queue or iteration < n_iter:
+        try:
+            x_probe = optimizer._queue.popleft()
+        except IndexError:
+            x_probe = optimizer.suggest()
+            iteration += 1
+        print(f"Current configuration: {x_probe}")
+        optimizer.probe(x_probe, lazy=False)
+
+        # save state after every iteration
+        optimizer.save_state(path=state_path)
+
+        if optimizer._bounds_transformer and iteration > 0:
+            optimizer.set_bounds(optimizer._bounds_transformer.transform(optimizer._space))
+
+    optimizer.logger.log_optimization_end()
+
 # Bayesian Optimization for the 4 methods (semla/None, global, patch, objectdetection)
 def bo_optimize(
         source_domains_path: str,
@@ -145,7 +175,7 @@ def bo_optimize(
         output_dir: str,
         vocab_embedding_method: VocabEmbeddingMethod,
         normalize_centroids: bool = True,
-        normalization_method: NormalizationMethod = NormalizationMethod.L1,
+        normalization_method: NormalizationMethod = NormalizationMethod.ZSCORE,
         top_q_frac: float | None = None,
         top_q_fixed: int | None = None,
         subset_fraction: float = 1.0,
@@ -155,13 +185,16 @@ def bo_optimize(
         use_val_portion: bool = True,
         init_points: int = 5,
         n_iter: int = 25,
+        resume_from_state: str | None = None,
 ) -> None:
+    root_dir = os.path.abspath(os.path.dirname(__file__))
+    base_output_dir = os.path.join(root_dir, output_dir, f"bo_{vocab_embedding_method.value}")
+    os.makedirs(base_output_dir, exist_ok=True)
+
     source_domains = load_domains_from_yaml(source_domains_path)
     target_domains = load_domains_from_yaml(target_domains_path)
     similarity_measure_name = config.get("similarity_measure_name", "euclidean")
     combination_type = config.get("combination_type", "cat")
-
-    base_output_dir = os.path.join(output_dir, f"bo_{vocab_embedding_method.value}")
 
     orchestrator = DomainOrchestrator(
         source_domains, vocab_embedding_method,
@@ -176,22 +209,59 @@ def bo_optimize(
     # TODO
     if vocab_embedding_method is VocabEmbeddingMethod.NONE:
         pbounds = {
-            "top_k_opt": (5, 11),
-            "temperature_opt": (0.01, 0.2),
+            "top_k_opt": (5, 12),
+            "temperature_opt": (0.05, 0.5)
         }
+        # TODO
+        points_to_probe = [
+            {'top_k_opt': 5.0, 'temperature_opt': 0.05},
+            {'top_k_opt': 5.0, 'temperature_opt': 0.1},
+            {'top_k_opt': 11.9, 'temperature_opt': 0.2},
+            {'top_k_opt': 8.0, 'temperature_opt': 0.05},
+            {'top_k_opt': 6.0, 'temperature_opt': 0.4},
+        ]
+    # normalisierte Baseline
+    elif vocab_embedding_method is VocabEmbeddingMethod.NONE_NORMALIZED:
+        pbounds = {
+            "top_k_opt": (5, 12),
+            "temperature_opt": (0.4, 2.8)
+        }
+
+        points_to_probe = [
+            {'top_k_opt': 5.0, 'temperature_opt': 2.6},
+            {'top_k_opt': 7.0, 'temperature_opt': 1.0024451985674303},
+            {'top_k_opt': 5.0, 'temperature_opt': 1.20017792074756059},
+            {'top_k_opt': 5.0, 'temperature_opt': 1.80017792074756059},
+            {'top_k_opt': 9.0, 'temperature_opt': 0.91898151213749746},
+        ]
     elif vocab_embedding_method is VocabEmbeddingMethod.GLOBAL:
         pbounds = {
-            "top_k_opt": (5, 11),
-            "temperature_opt": (0.01, 0.2),
+            "top_k_opt": (5, 12),
+            "temperature_opt": (0.4, 2.0),
             "gamma_opt": (0.1, 0.9),
         }
+        points_to_probe = [
+            {'top_k_opt': 9.0, 'temperature_opt': 1.0024451985674303, "gamma_opt": 0.5876957150855384},
+            {'top_k_opt': 7.0, 'temperature_opt': 1.4090018885526177, "gamma_opt": 0.659949747371983},
+            {'top_k_opt': 5.0, 'temperature_opt': 1.80017792074756059, "gamma_opt": 0.24945997376568052},
+            {'top_k_opt': 9.0, 'temperature_opt': 1.1000249098176345, "gamma_opt": 0.6176252960811272},
+            {'top_k_opt': 5.0, 'temperature_opt': 0.6027792655987208, "gamma_opt": 0.7491132645340255},
+        ]
+
     elif vocab_embedding_method is VocabEmbeddingMethod.PATCH or \
             vocab_embedding_method is VocabEmbeddingMethod.OBJECTDETECTION:
         pbounds = {
-            "top_k_opt": (5, 11),
-            "temperature_opt": (0.01, 0.2), # falls fail: andere freezen und noch mit 0.1 probieren
+            "top_k_opt": (5, 12),
+            "temperature_opt": (0.4, 2.0),
             "gamma_opt": (0.1, 0.9),
         }
+        points_to_probe = [
+            {'top_k_opt': 9.0, 'temperature_opt': 1.0024451985674303, "gamma_opt": 0.5876957150855384},
+            {'top_k_opt': 7.0, 'temperature_opt': 1.4090018885526177, "gamma_opt": 0.659949747371983},
+            {'top_k_opt': 5.0, 'temperature_opt': 1.80017792074756059, "gamma_opt": 0.24945997376568052},
+            {'top_k_opt': 9.0, 'temperature_opt': 1.1000249098176345, "gamma_opt": 0.6176252960811272},
+            {'top_k_opt': 5.0, 'temperature_opt': 0.6027792655987208, "gamma_opt": 0.7491132645340255},
+        ]
     else:
         raise ValueError(f"Unknown method: {vocab_embedding_method.value}")
 
@@ -229,12 +299,28 @@ def bo_optimize(
         print(f"BO {run_name} => h-mIoU = {h}")
         return h
 
-    optimizer = BayesianOptimization(f=objective, pbounds=pbounds, random_state=42)
-    optimizer.maximize(init_points=init_points, n_iter=n_iter)
+    acquisition_function = acquisition.ExpectedImprovement(
+        xi=0.05,                    # Startwert genau zwischen Exploration (0.1) und Exploitation (0)
+        exploration_decay=0.9,      # xi wird jede iteration mit 0.9 multipliziert
+        exploration_decay_delay=5,  # Decay erst nach den ersten 5 Iterationen (init_points) starten
+    )
+    optimizer = BayesianOptimization(f=objective, acquisition_function=acquisition_function, pbounds=pbounds, random_state=42)
+
+    # Lade vorherigen Zustand des Optimizers
+    if resume_from_state is not None:
+        optimizer.load_state(resume_from_state)
+        print(f"BO: Zustand aus geladen mit {len(optimizer.space)} bisherigen Punkten")
+
+    for point in points_to_probe:
+        filtered_point = {k: v for k, v in point.items() if k in pbounds}
+        optimizer.probe(params=filtered_point, lazy=True)
+
+    os.makedirs(base_output_dir, exist_ok=True)
+    save_path_optimizer = os.path.join(base_output_dir, "optimizer_state.json")
+    maximize_with_saving(optimizer, init_points=init_points, n_iter=n_iter, state_path=save_path_optimizer)
 
     # Save best results
     best = optimizer.max
-    os.makedirs(base_output_dir, exist_ok=True)
     with open(os.path.join(base_output_dir, "best_config.json"), "w") as f:
         json.dump(best, f, indent=4)
 
@@ -308,8 +394,7 @@ def grid_search_centroid_ablation(
           f"(K: {best['top_k']}, tau: {best['tau']})")
 
 
-# Ablation 2: l1 / zscore / minmax nromalization of the 2 distance terms.
-# Only applicable for GLOBAL / PATCH / OBJECTDETECTION, since D_voc only exists there
+# Ablation 2: zscore / minmax normalization of the 2 distance terms.
 def grid_search_normalization_ablation(
         source_domains_path: str,
         target_domains_path: str,
@@ -334,11 +419,13 @@ def grid_search_normalization_ablation(
     target_domains = load_domains_from_yaml(target_domains_path)
     similarity_measure_name = config.get("similarity_measure_name", "euclidean")
     combination_type = config.get("combination_type", "cat")
+    top_q_frac = 0.5
+    gamma_fixed = 0.5
 
     norm_name = normalization_method.value
-    centroid_tag = "centroidsnorm" if normalize_centroids else "centroidsraw"
     base_output_dir = os.path.join(
-        output_dir, f"ablation_norm_{norm_name}_{centroid_tag}_{vocab_embedding_method.value}"
+        output_dir,
+        f"ablation_norm_{norm_name}",
     )
 
     orchestrator = DomainOrchestrator(
@@ -348,16 +435,17 @@ def grid_search_normalization_ablation(
         subset_seed=subset_seed,
         val_test_split=val_test_split,
         val_test_seed=val_test_seed,
-        use_val_portion=use_val_portion
+        use_val_portion=use_val_portion,
     )
 
     summary = {}
 
-    for top_k, tau, gamma in itertools.product(GRID_TOP_K, GRID_TAU, GRID_GAMMA):
-        run_name = f"k{top_k}_tau{tau}_g{gamma}"
+    GRID_TAU = [0.05, 0.1, 0.3, 0.5, 1.0, 2.0]
+    for top_k, tau in itertools.product(GRID_TOP_K, GRID_TAU):
+        run_name = f"k{top_k}_tau{tau}"
         run_output_dir = os.path.join(base_output_dir, run_name)
 
-        print(f"\nABLATION GRID: {run_name} (norm: {norm_name}, {centroid_tag})")
+        print(f"\nABLATION NORM: {run_name} (norm: {norm_name}, gamma={gamma_fixed})")
 
         results, weights, _ = orchestrator.benchmark_semla(
             target_domains=target_domains,
@@ -368,17 +456,18 @@ def grid_search_normalization_ablation(
             combination_type=combination_type,
             vocab_embedding_method=vocab_embedding_method,
             top_q=top_q_fixed,
-            gamma=gamma,
+            top_q_frac=top_q_frac,
+            gamma=gamma_fixed,
             normalization_method=normalization_method,
         )
         save_results(results, weights, output_dir=run_output_dir)
 
         h = compute_hmean(results)
         summary[run_name] = {
-            "top_k": top_k, "tau": tau, "gamma": gamma,
+            "top_k": top_k, "tau": tau, "gamma": gamma_fixed,
             "h_miou": h, "results": results,
         }
-        print(f"ABLATION GRID: {run_name} => h-mIoU: {h}")
+        print(f"ABLATION NORM: {run_name} => h-mIoU: {h}")
 
     os.makedirs(base_output_dir, exist_ok=True)
     with open(os.path.join(base_output_dir, "grid_summary.json"), "w") as f:
@@ -387,7 +476,274 @@ def grid_search_normalization_ablation(
     best_name = max(summary, key=lambda k: summary[k]["h_miou"])
     best = summary[best_name]
     print(f"\nABLATION BEST: {best_name}: h-mIoU: {best['h_miou']} "
-          f"(K: {best['top_k']}, tau: {best['tau']}, gamma: {best['gamma']})")
+          f"(K: {best['top_k']}, tau: {best['tau']}, gamma: {gamma_fixed})")
+
+
+# Ablation 3: euclidean vs. cosine similarity measure on PATCH method
+def grid_search_distance_metric_ablation(
+        source_domains_path: str,
+        target_domains_path: str,
+        config: Dict[str, Any],
+        output_dir: str,
+        vocab_embedding_method: VocabEmbeddingMethod,
+        normalization_method: NormalizationMethod,
+        normalize_centroids: bool = True,
+        top_q_fixed: int | None = None,
+        top_q_frac: float | None = None,
+        subset_fraction: float = 1.0,
+        subset_seed: int = 42,
+        val_test_split: float = 0.0,
+        val_test_seed: int = 123,
+        use_val_portion: bool = True,
+) -> None:
+    if vocab_embedding_method is VocabEmbeddingMethod.NONE:
+        raise ValueError(
+            "Ablation experiment is not applicable for NONE method"
+        )
+
+    source_domains = load_domains_from_yaml(source_domains_path)
+    target_domains = load_domains_from_yaml(target_domains_path)
+    combination_type = config.get("combination_type", "cat")
+    top_q_frac = config.get("top_q_frac", None)
+    gamma_fixed = 0.5
+
+    centroid_tag = "centroidsnorm" if normalize_centroids else "centroidsraw"
+    base_output_dir = os.path.join(
+        output_dir, f"ablation_distmetric_{vocab_embedding_method.value}"
+    )
+
+    orchestrator = DomainOrchestrator(
+        source_domains, vocab_embedding_method,
+        normalize_centroids=normalize_centroids,
+        subset_fraction=subset_fraction,
+        subset_seed=subset_seed,
+        val_test_split=val_test_split,
+        val_test_seed=val_test_seed,
+        use_val_portion=use_val_portion,
+    )
+
+    summary = {}
+
+    for similarity_measure_name in ["euclidean", "cosine", "euclidean_cosine"]:
+        for top_k, tau in itertools.product(GRID_TOP_K, GRID_TAU):
+            run_name = f"{similarity_measure_name}_k{top_k}_tau{tau}"
+            run_output_dir = os.path.join(base_output_dir, run_name)
+
+            print(f"\nABLATION DISTMETRIC: {run_name} ({centroid_tag})")
+
+            results, weights, _ = orchestrator.benchmark_semla(
+                target_domains=target_domains,
+                remove_target_adapter=True,
+                similarity_measure=NAME_MEASURE_MAPPING["euclidean"],
+                softmax_temperature=tau,
+                top_k=top_k,
+                combination_type=combination_type,
+                vocab_embedding_method=vocab_embedding_method,
+                top_q=top_q_fixed,
+                top_q_frac=top_q_frac,
+                gamma=gamma_fixed,
+                normalization_method=normalization_method
+            )
+            save_results(results, weights, output_dir=run_output_dir)
+
+            h = compute_hmean(results)
+            summary[run_name] = {
+                "similarity_measure": similarity_measure_name,
+                "top_k": top_k, "tau": tau,
+                "h_miou": h, "results": results,
+            }
+            print(f"ABLATION DISTMETRIC: {run_name} => h-mIoU: {h}")
+
+    os.makedirs(base_output_dir, exist_ok=True)
+    with open(os.path.join(base_output_dir, "grid_summary.json"), "w") as f:
+        json.dump(summary, f, indent=4)
+
+    best_name = max(summary, key=lambda k: summary[k]["h_miou"])
+    best = summary[best_name]
+    print(f"\nABLATION BEST: {best_name}: h-mIoU: {best['h_miou']} "
+          f"(measure: {best['similarity_measure']}, K: {best['top_k']}, tau: {best['tau']})")
+
+def grid_search_topq_ablation(
+        source_domains_path: str,
+        target_domains_path: str,
+        config: Dict[str, Any],
+        output_dir: str,
+        vocab_embedding_method: VocabEmbeddingMethod,
+        normalization_method: NormalizationMethod,
+        normalize_centroids: bool = True,
+        subset_fraction: float = 1.0,
+        subset_seed: int = 42,
+        val_test_split: float = 0.0,
+        val_test_seed: int = 123,
+        use_val_portion: bool = True,
+) -> None:
+    if vocab_embedding_method is VocabEmbeddingMethod.NONE:
+        raise ValueError("Ablation experiment is not applicable for NONE method")
+
+    source_domains = load_domains_from_yaml(source_domains_path)
+    target_domains = load_domains_from_yaml(target_domains_path)
+    similarity_measure_name = config.get("similarity_measure_name", "euclidean")
+    combination_type = config.get("combination_type", "cat")
+    tau_fixed = config.get("temperature", 0.1)
+    gamma_fixed = config.get("gamma", 0.5)
+
+    base_output_dir = os.path.join(
+        output_dir, f"ablation_topq"
+    )
+
+    orchestrator = DomainOrchestrator(
+        source_domains, vocab_embedding_method,
+        normalize_centroids=normalize_centroids,
+        subset_fraction=subset_fraction,
+        subset_seed=subset_seed,
+        val_test_split=val_test_split,
+        val_test_seed=val_test_seed,
+        use_val_portion=use_val_portion,
+    )
+
+    summary = {}
+
+    for top_q in GRID_TOP_Q_FIXED:
+        for top_k in GRID_TOP_K:
+            run_name = f"fixed_q{top_q}_k{top_k}"
+            run_output_dir = os.path.join(base_output_dir, run_name)
+            print(f"\nABLATION TOPQ: {run_name}")
+
+            results, weights, _ = orchestrator.benchmark_semla(
+                target_domains=target_domains,
+                remove_target_adapter=True,
+                similarity_measure=NAME_MEASURE_MAPPING[similarity_measure_name],
+                softmax_temperature=tau_fixed,
+                top_k=top_k,
+                combination_type=combination_type,
+                vocab_embedding_method=vocab_embedding_method,
+                top_q=top_q,
+                top_q_frac=None,
+                gamma=gamma_fixed,
+                normalization_method=normalization_method,
+            )
+            save_results(results, weights, output_dir=run_output_dir)
+            h = compute_hmean(results)
+            summary[run_name] = {"mode": "fixed", "top_q": top_q, "top_k": top_k, "h_miou": h, "results": results}
+            print(f"ABLATION TOPQ: {run_name} => h-mIoU: {h}")
+
+    for top_q_frac in GRID_TOP_Q_FRAC:
+        for top_k in GRID_TOP_K:
+            run_name = f"frac{top_q_frac}_k{top_k}"
+            run_output_dir = os.path.join(base_output_dir, run_name)
+            print(f"\nABLATION TOPQ: {run_name}")
+
+            results, weights, _ = orchestrator.benchmark_semla(
+                target_domains=target_domains,
+                remove_target_adapter=True,
+                similarity_measure=NAME_MEASURE_MAPPING[similarity_measure_name],
+                softmax_temperature=tau_fixed,
+                top_k=top_k,
+                combination_type=combination_type,
+                vocab_embedding_method=vocab_embedding_method,
+                top_q_frac=top_q_frac,
+                gamma=gamma_fixed,
+                normalization_method=normalization_method,
+            )
+            save_results(results, weights, output_dir=run_output_dir)
+            h = compute_hmean(results)
+            summary[run_name] = {"mode": "frac", "top_q_frac": top_q_frac, "top_k": top_k, "h_miou": h, "results": results}
+            print(f"ABLATION TOPQ: {run_name} => h-mIoU: {h}")
+
+    os.makedirs(base_output_dir, exist_ok=True)
+    with open(os.path.join(base_output_dir, "grid_summary.json"), "w") as f:
+        json.dump(summary, f, indent=4)
+
+    best_name = max(summary, key=lambda k: summary[k]["h_miou"])
+    best = summary[best_name]
+    print(f"\nABLATION BEST: {best_name}: h-mIoU: {best['h_miou']}")
+
+def grid_search_tau_k_sensitivity(
+        source_domains_path: str,
+        target_domains_path: str,
+        config: Dict[str, Any],
+        output_dir: str,
+        vocab_embedding_method: VocabEmbeddingMethod,
+        normalization_method: NormalizationMethod,
+        normalize_centroids: bool = True,
+        subset_fraction: float = 1.0,
+        subset_seed: int = 42,
+        val_test_split: float = 0.0,
+        val_test_seed: int = 123,
+        use_val_portion: bool = True,
+) -> None:
+    if vocab_embedding_method is VocabEmbeddingMethod.NONE:
+        raise ValueError("Ablation experiment is not applicable for NONE method")
+
+    source_domains = load_domains_from_yaml(source_domains_path)
+    target_domains = load_domains_from_yaml(target_domains_path)
+    similarity_measure_name = config.get("similarity_measure_name", "euclidean")
+    combination_type = config.get("combination_type", "cat")
+    top_q_fixed = config.get("top_q", 5)
+    top_q_frac = config.get("top_q_frac", None)
+
+    centroid_tag = "centroidsnorm" if normalize_centroids else "centroidsraw"
+    base_output_dir = os.path.join(
+        output_dir, f"ablation_tauk_sensitivity_{centroid_tag}_{vocab_embedding_method.value}"
+    )
+
+    orchestrator = DomainOrchestrator(
+        source_domains, vocab_embedding_method,
+        normalize_centroids=normalize_centroids,
+        subset_fraction=subset_fraction,
+        subset_seed=subset_seed,
+        val_test_split=val_test_split,
+        val_test_seed=val_test_seed,
+        use_val_portion=use_val_portion,
+    )
+
+    summary = {}
+
+    for gamma in GRID_GAMMA_SENSITIVITY:
+        for top_k, tau in itertools.product(GRID_TOP_K, GRID_TAU):
+            run_name = f"g{gamma}_k{top_k}_tau{tau}"
+            run_output_dir = os.path.join(base_output_dir, run_name)
+
+            print(f"\nABLATION TAU-K SENSITIVITY: {run_name}")
+
+            results, weights, _ = orchestrator.benchmark_semla(
+                target_domains=target_domains,
+                remove_target_adapter=True,
+                similarity_measure=NAME_MEASURE_MAPPING[similarity_measure_name],
+                softmax_temperature=tau,
+                top_k=top_k,
+                combination_type=combination_type,
+                vocab_embedding_method=vocab_embedding_method,
+                top_q=top_q_fixed,
+                top_q_frac=top_q_frac,
+                gamma=gamma,
+                normalization_method=normalization_method,
+            )
+            save_results(results, weights, output_dir=run_output_dir)
+
+            h = compute_hmean(results)
+            summary[run_name] = {
+                "gamma": gamma, "top_k": top_k, "tau": tau,
+                "h_miou": h, "results": results,
+            }
+            print(f"ABLATION TAU-K SENSITIVITY: {run_name} => h-mIoU: {h}")
+
+    os.makedirs(base_output_dir, exist_ok=True)
+    with open(os.path.join(base_output_dir, "grid_summary.json"), "w") as f:
+        json.dump(summary, f, indent=4)
+
+    # Bestes Ergebnis pro gamma , für die Heatmap-Auswertung
+    for gamma in GRID_GAMMA_SENSITIVITY:
+        subset = {k: v for k, v in summary.items() if v["gamma"] == gamma}
+        best_name = max(subset, key=lambda k: subset[k]["h_miou"])
+        best = subset[best_name]
+        print(f"BEST at gamma={gamma}: {best_name} => h-mIoU: {best['h_miou']} "
+              f"(K: {best['top_k']}, tau: {best['tau']})")
+
+    best_name = max(summary, key=lambda k: summary[k]["h_miou"])
+    best = summary[best_name]
+    print(f"\nABLATION BEST: {best_name}: h-mIoU: {best['h_miou']} "
+          f"(gamma: {best['gamma']}, K: {best['top_k']}, tau: {best['tau']})")
 
 
 def parse_args():
@@ -401,6 +757,9 @@ def parse_args():
                             "bo_optimize",
                             "grid_centroid_ablation",
                             "grid_norm_ablation",
+                            "grid_distance_metric_ablation",
+                            "grid_topq_frac_ablation",
+                            "grid_tau_k_sensitivity_ablation"
                         ],
                         help="Type of experiment to run")
 
@@ -416,7 +775,7 @@ def parse_args():
                         help="Whether to remove target adapter")
 
     parser.add_argument("--voc_distance_method", type=str,
-                        choices=["none", "global", "patch", "objectdetection"],
+                        choices=["none", "none_normalized", "global", "patch", "objectdetection"],
                         default="none")
 
     parser.add_argument("--normalize_centroids", action="store_true", default=True,
@@ -424,8 +783,8 @@ def parse_args():
     parser.add_argument("--no_normalize_centroids", dest="normalize_centroids", action="store_false",
                         help="Do not normalize centroids")
     parser.add_argument("--normalization_method", type=str,
-                        choices=["l1", "zscore", "minmax"],
-                        default="l1",
+                        choices=["zscore", "minmax"],
+                        default="zscore",
                         help="Normalization method for combining the distance terms")
     parser.add_argument("--subset_fraction", type=float, default=1.0,
                         help="Portion of subset for valid / test split")
@@ -438,8 +797,8 @@ def parse_args():
     parser.add_argument("--bo_n_iter", type=int, default=25,
                         help="Number of BO iterations")
 
-    parser.add_argument("--top_q_frac", type=float, default=None,
-                        help="Fester top_q_frac aus dem Pilot-Grid (nicht im BO gesucht)")
+    parser.add_argument("--top_q_frac", type=float, default=0.5,
+                        help="Fixed value for the Top-Q-Fracture Value")
 
 
     # Val / Test Split
@@ -449,6 +808,9 @@ def parse_args():
                         help="Seed for the split")
     parser.add_argument("--eval_on_test", action="store_true",
                         help="if set to true, the test set is used for evaluation")
+
+    parser.add_argument("--bo_resume_state", type=str, default=None,
+                        help="Path to JSON file containing optimizer state for Bayessian Optimization")
 
     return parser.parse_args()
 
@@ -473,7 +835,7 @@ def main():
     top_q_fixed = semla_config.get("top_q", None)
 
     if args.experiment == "zeroshot":
-        orchestrator = DomainOrchestrator(source_domains, args.voc_distance_method,
+        orchestrator = DomainOrchestrator(source_domains, voc_method,
                                           normalize_centroids=args.normalize_centroids,
                                           subset_fraction=args.subset_fraction,
                                           subset_seed=args.subset_seed,
@@ -483,7 +845,7 @@ def main():
         benchmark_zeroshot(target_domains, args.output_dir, orchestrator)
 
     elif args.experiment == "oracle":
-        orchestrator = DomainOrchestrator(source_domains, args.voc_distance_method,
+        orchestrator = DomainOrchestrator(source_domains, voc_method,
                                           normalize_centroids=args.normalize_centroids,
                                           subset_fraction=args.subset_fraction,
                                           subset_seed=args.subset_seed,
@@ -493,7 +855,7 @@ def main():
         benchmark_oracle(target_domains, args.output_dir, orchestrator)
 
     elif args.experiment == "uniform":
-        orchestrator = DomainOrchestrator(source_domains, args.voc_distance_method,
+        orchestrator = DomainOrchestrator(source_domains, voc_method,
                                           normalize_centroids=args.normalize_centroids,
                                           subset_fraction=args.subset_fraction,
                                           subset_seed=args.subset_seed,
@@ -532,7 +894,8 @@ def main():
             val_test_seed=args.val_test_seed,
             use_val_portion=args.use_val_portion,
             init_points=args.bo_init_points,
-            n_iter=args.bo_n_iter
+            n_iter=args.bo_n_iter,
+            resume_from_state=args.bo_resume_state
         )
 
     elif args.experiment == "grid_centroid_ablation":
@@ -559,6 +922,55 @@ def main():
             normalization_method=norm_method,
             normalize_centroids=args.normalize_centroids,
             top_q_fixed=top_q_fixed,
+            subset_fraction=args.subset_fraction,
+            subset_seed=args.subset_seed,
+            val_test_split=args.val_test_split,
+            val_test_seed=args.val_test_seed,
+            use_val_portion=args.use_val_portion
+        )
+
+    elif args.experiment == "grid_distance_metric_ablation":
+        grid_search_distance_metric_ablation(
+            source_domains_path=args.source_domains,
+            target_domains_path=args.target_domains,
+            config=semla_config,
+            output_dir=args.output_dir,
+            vocab_embedding_method=voc_method,
+            normalization_method=norm_method,
+            normalize_centroids=args.normalize_centroids,
+            top_q_fixed=top_q_fixed,
+            subset_fraction=args.subset_fraction,
+            subset_seed=args.subset_seed,
+            val_test_split=args.val_test_split,
+            val_test_seed=args.val_test_seed,
+            use_val_portion=args.use_val_portion
+        )
+
+    elif args.experiment == "grid_topq_frac_ablation":
+        grid_search_topq_ablation(
+            source_domains_path=args.source_domains,
+            target_domains_path=args.target_domains,
+            config=semla_config,
+            output_dir=args.output_dir,
+            vocab_embedding_method=voc_method,
+            normalization_method=norm_method,
+            normalize_centroids=args.normalize_centroids,
+            subset_fraction=args.subset_fraction,
+            subset_seed=args.subset_seed,
+            val_test_split=args.val_test_split,
+            val_test_seed=args.val_test_seed,
+            use_val_portion=args.use_val_portion
+        )
+
+    elif args.experiment == "grid_tau_k_sensitivity_ablation":
+        grid_search_tau_k_sensitivity(
+            source_domains_path=args.source_domains,
+            target_domains_path=args.target_domains,
+            config=semla_config,
+            output_dir=args.output_dir,
+            vocab_embedding_method=voc_method,
+            normalization_method=norm_method,
+            normalize_centroids=args.normalize_centroids,
             subset_fraction=args.subset_fraction,
             subset_seed=args.subset_seed,
             val_test_split=args.val_test_split,

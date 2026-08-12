@@ -1,10 +1,7 @@
 from enum import Enum
 from typing import Any
 
-from sklearn.cluster import AgglomerativeClustering
-
-from domain_orchestrator.hf_clip.modeling_clip import CLIPModel
-from domain_orchestrator.hf_clip.processing_clip import CLIPProcessor
+from transformers import CLIPModel, CLIPProcessor
 from transformers import CLIPTokenizer
 from abc import abstractmethod
 import numpy as np
@@ -23,6 +20,7 @@ templates = [
 
 class VocabEmbeddingMethod(Enum):
     NONE = "none"
+    NONE_NORMALIZED = "none_normalized"
     GLOBAL = "global"
     PATCH = "patch"
     OBJECTDETECTION = "objectdetection"
@@ -95,7 +93,12 @@ class ClipEmbeddingModel(EmbeddingModel):
         return image_embeddings  # nicht normalisiert
 
     def embed_image_dispatch(self, image_path, vocab_embedding_method):
-        if vocab_embedding_method is VocabEmbeddingMethod.NONE:
+        if vocab_embedding_method in (
+                VocabEmbeddingMethod.NONE,
+                VocabEmbeddingMethod.NONE_NORMALIZED,
+                VocabEmbeddingMethod.GLOBAL,
+                VocabEmbeddingMethod.OBJECTDETECTION,
+        ):
             raw_embed = self.embed_image_original(image_path)
             norm_embed = raw_embed / np.linalg.norm(raw_embed)
             return norm_embed, raw_embed, None
@@ -201,7 +204,6 @@ class EmbeddingManager:
     """
     def embed_text(self, texts: list[str]) -> npt.NDArray:
         """Embed a text."""
-        # TODO kann bei Python eine Methode überladen werden? Z.B. eine Methode die str annimmt und eine andere die Liste annimmt ?
         return self.embedding_model.embed_texts_batched(texts)
 
     """
@@ -220,7 +222,6 @@ class EmbeddingManager:
 
 
         all_class_embeddings = self.embedding_model.embed_texts_batched(classnames)  # schon numpy (N, 768)
-        print(all_class_embeddings.shape)
         np.savez(save_path, vocab_embeddings=all_class_embeddings)
         torch.cuda.empty_cache()
         return all_class_embeddings

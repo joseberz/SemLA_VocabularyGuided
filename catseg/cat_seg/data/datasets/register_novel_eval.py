@@ -24,7 +24,7 @@ NOVEL_DATASETS = {
     },
     "nyunovel": {
         "class_names": ["dog", "bicycle", "keyboard", "potted plant", "teddy bear", "dishwasher", "microwave", "trash can"],
-        "novel_ids": [40, 42, 43, 44, 45, 46, 47, 48],
+        "novel_ids": [40, 41, 42, 43, 44, 45, 46, 47],
         "root_subdir": "NYU_novel",
         "img_suffix":  None,
         "mask_suffix": None,
@@ -141,7 +141,7 @@ def register_novel_eval_datasets(root):
                 meta["class_names"] = [k["name"] for k in PASCAL_CTX_59_CATEGORIES][:] + current_class_names
 
             MetadataCatalog.get(dataset_name).set(
-                stuff_classes=meta["class_names"], # TODO müssen alle klassen sein / Prüfen ob TODO noch aktuell
+                stuff_classes=meta["class_names"], # TODO müssen alle klassen sein / Prüfen ob TODO noch aktuell / Prüfen ob TODO des TODO noch aktuell
                 image_root=image_root,
                 sem_seg_root=mask_root,
                 evaluator_type="novel_sem_seg",

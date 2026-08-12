@@ -46,4 +46,4 @@ class ObjectDetector:
         self.model.set_classes(self.classes)
 
     def detect_objects(self, image_path):
-        return self.model.predict(image_path, conf=0.2, verbose=False)
+        return self.model.predict(image_path, conf=0.15, verbose=False)

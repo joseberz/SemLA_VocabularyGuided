@@ -1,5 +1,5 @@
 from typing import List
-from catseg.cat_seg.modeling.transformer.cat_seg_predictor import CATSegPredictor
+from cat_seg.modeling.transformer.cat_seg_predictor import CATSegPredictor
 
 def find_predictor(model) -> CATSegPredictor:
     for module in model.modules():

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import time
 from typing import Union, Dict, Callable, List, Tuple
@@ -13,13 +14,14 @@ import numpy as np
 import numpy.typing as npt
 
 import torch
+from PIL import Image
 from torch import nn
 
 import peft
 
 from catseg.NovelSemSegEvaluator import NovelSemSegEvaluator
 from .embedding import EmbeddingManager, VocabEmbeddingMethod
-from .object_detection import ObjectDetector, ADAPTER_VOCAB_JSONS
+from .object_detection import ObjectDetector
 
 logging.disable()
 
@@ -1136,7 +1138,7 @@ class DomainOrchestrator:
         vocab_embedding_method: VocabEmbeddingMethod = VocabEmbeddingMethod.GLOBAL,
         gamma: float = 0.5,
         top_q: int = 5,
-        normalization_method: NormalizationMethod = NormalizationMethod.L1,
+        normalization_method: NormalizationMethod = NormalizationMethod.ZSCORE,
         top_q_frac: float | None = None,
     ) -> None:
         from detectron2.evaluation import inference_context
@@ -1171,7 +1173,7 @@ class DomainOrchestrator:
                     )
                     current_embedding = ImageEmbedding(raw=embedding_raw, norm=embedding_norm)
 
-                    weight_dict, merged_adapter_name, vis_distance, voc_distance = self._merge(
+                    weight_dict, merged_adapter_name, vis_distance, voc_distance, _ = self._merge(
                         target_domain=current_target_domain,
                         remove_target_adapter=remove_target_adapter,
                         mode="centroid",
@@ -1199,7 +1201,32 @@ class DomainOrchestrator:
                     extended_mask = None
                     extended_classnames = None
 
-                    if vocab_embedding_method is not VocabEmbeddingMethod.NONE:
+                    # object detection
+                    if vocab_embedding_method is VocabEmbeddingMethod.OBJECTDETECTION:
+                        result_objects = self.object_detector.detect_objects(input_path)
+                        detected_classes = []
+                        boxes = result_objects[0].boxes
+                        for i in range(len(boxes)):
+                            class_id = int(boxes.cls[i].item())
+                            conf = float(boxes.conf[i].item())
+                            detected_classes.append((result_objects[0].names[class_id], conf))
+
+                        # im GT vorhandene Klassen rausfiltern
+                        detected_classes = [(name, conf) for name, conf in detected_classes if name not in gt_classnames]
+
+                        # Sortieren nach confidence, top-x rausnehmen
+                        detected_classes = sorted(detected_classes, key=lambda x: x[1], reverse=True)
+                        top_classes = list(dict.fromkeys(name for name, _ in detected_classes))[:top_x]
+
+                        extended_classnames = list(gt_classnames) + top_classes
+
+                        old_vocab = swap_class_vocabulary(self.current_model, extended_classnames)
+                        extended_out = self.current_model(inputs)
+                        extended_mask = extended_out[0]["sem_seg"].argmax(dim=0).cpu().numpy()
+                        restore_class_vocabulary(self.current_model, old_vocab)
+
+                    # global / patch
+                    elif vocab_embedding_method is not VocabEmbeddingMethod.NONE:
                         extended_classnames = list(gt_classnames)
                         query_embeddings = patch_embedding if patch_embedding is not None else [embedding_norm]
 
@@ -1221,6 +1248,8 @@ class DomainOrchestrator:
                         extended_out = self.current_model(inputs)
                         extended_mask = extended_out[0]["sem_seg"].argmax(dim=0).cpu().numpy()
                         restore_class_vocabulary(self.current_model, old_vocab)
+
+                        # für none keine erweiterung des Klassenvokabulars
 
                     save_qualitative_result(
                         image_path=input_path,

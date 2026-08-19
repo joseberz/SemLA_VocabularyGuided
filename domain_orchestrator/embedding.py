@@ -172,18 +172,35 @@ class ClipEmbeddingModel(EmbeddingModel):
         return text_embeddings.detach().cpu().numpy()
 
     def embed_texts_batched(self, texts: list[str]) -> npt.NDArray:
-        """Embed alle Texte in einem einzigen Forward Pass."""
-        all_templated = [t.format(text) for text in texts for t in templates]
+        """
+        Embed alle Texte in einem einzigen Forward Pass.
+        Berücksichtigt Synonyme aus komma-separierter Liste.
+        """
+        synonym_lists = [[s.strip() for s in text.split(",") if s.strip()] or [text]
+                         for text in texts]
+        flat_synonyms = [s for syns in synonym_lists for s in syns]
+
+        all_templated = [t.format(s) for s in flat_synonyms for t in templates]
 
         with torch.no_grad():
             inputs = self.tokenizer(all_templated, padding=True, return_tensors="pt").to("cuda")
             embs = self.embedding_model.get_text_features(**inputs)
             embs = embs / embs.norm(dim=-1, keepdim=True)
         embs = embs.detach().cpu().numpy()
-        # Pro Klasse die 5 Templates mitteln
-        embs = embs.reshape(len(texts), len(templates), -1).mean(axis=1)
-        embs = embs / np.linalg.norm(embs, axis=-1, keepdims=True)
-        return embs
+
+        # Pro Synonym über die Templates mitteln
+        embs = embs.reshape(len(flat_synonyms), len(templates), -1).mean(axis=1)
+
+        # Pro Klasse über ihre Synonyme mitteln
+        out = np.zeros((len(texts), embs.shape[-1]), dtype=embs.dtype)
+        idx = 0
+        for i, syns in enumerate(synonym_lists):
+            n = len(syns)
+            out[i] = embs[idx:idx + n].mean(axis=0)
+            idx += n
+
+        out = out / np.linalg.norm(out, axis=-1, keepdims=True)
+        return out
 
 
 class EmbeddingManager:

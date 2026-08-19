@@ -1,11 +1,11 @@
 from argparse import Namespace
+import json
 
 import logging
 from typing import Literal
 from catseg.train_net import setup
 
 DETECTRON2_DATASET_PATH = ""
-ALT_PFAD = "/datasets/"
 
 _classnames_cache: dict[str, list[str]] = {}
 

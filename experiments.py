@@ -113,6 +113,7 @@ def semla_merge(target_domains: List[str],
                 config: Dict[str, Any], remove_target_adapter: bool, 
                 output_dir: str,
                 orchestrator: DomainOrchestrator,
+                uniform_weight_selected_adapters: bool = False,
                 vocab_embedding_method: VocabEmbeddingMethod = VocabEmbeddingMethod.NONE,
                 normalization_method: NormalizationMethod = NormalizationMethod.ZSCORE,
                 ) -> None:
@@ -137,7 +138,8 @@ def semla_merge(target_domains: List[str],
         gamma=gamma,
         save_per_image_log=True,
         normalization_method=normalization_method,
-        top_q_frac=top_q_frac
+        top_q_frac=top_q_frac,
+        uniform_weight_selected_adapters=uniform_weight_selected_adapters
     )
     save_results(results, weights, correlation_log, output_dir=output_dir)
 
@@ -745,6 +747,93 @@ def grid_search_tau_k_sensitivity(
     print(f"\nABLATION BEST: {best_name}: h-mIoU: {best['h_miou']} "
           f"(gamma: {best['gamma']}, K: {best['top_k']}, tau: {best['tau']})")
 
+def grid_search_weighting_ablation(
+        source_domains_path: str,
+        target_domains_path: str,
+        config: Dict[str, Any],
+        output_dir: str,
+        vocab_embedding_method: VocabEmbeddingMethod,
+        normalization_method: NormalizationMethod,
+        normalize_centroids: bool = True,
+        subset_fraction: float = 1.0,
+        subset_seed: int = 42,
+        val_test_split: float = 0.0,
+        val_test_seed: int = 123,
+        use_val_portion: bool = True,
+) -> None:
+    """Ablation: uniforme Gewichtung statt Softmax"""
+    root_dir = os.path.abspath(os.path.dirname(__file__))
+
+    source_domains = load_domains_from_yaml(source_domains_path)
+    target_domains = load_domains_from_yaml(target_domains_path)
+    similarity_measure_name = config.get("similarity_measure_name", "euclidean")
+    combination_type = config.get("combination_type", "cat")
+    tau_fixed = config.get("temperature", 0.1)
+    top_q_fixed = config.get("top_q", 5)
+    top_q_frac = config.get("top_q_frac", 0.5)
+
+    base_output_dir = os.path.join(
+        root_dir, output_dir, f"ablation_weighting_{vocab_embedding_method.value}"
+    )
+
+    orchestrator = DomainOrchestrator(
+        source_domains, vocab_embedding_method,
+        normalize_centroids=normalize_centroids,
+        subset_fraction=subset_fraction,
+        subset_seed=subset_seed,
+        val_test_split=val_test_split,
+        val_test_seed=val_test_seed,
+        use_val_portion=use_val_portion,
+    )
+
+    summary = {}
+
+    GRID_GAMMA = [0.1, 0.3, 0.5, 0.7, 0.9]
+    GRID_TOP_K = [5, 7, 9, 12]
+
+    gammas = GRID_GAMMA if vocab_embedding_method is not VocabEmbeddingMethod.NONE else [None]
+
+    for gamma in gammas:
+        for top_k in GRID_TOP_K:
+            gamma_arg = gamma if gamma is not None else 0.5  # bei NONE is gamma irrelevant
+            run_name = f"g{gamma}_k{top_k}" if gamma is not None else f"k{top_k}"
+            run_output_dir = os.path.join(base_output_dir, run_name)
+
+            print(f"\nABLATION WEIGHTING (uniform): {run_name}")
+
+            results, weights, _ = orchestrator.benchmark_semla(
+                target_domains=target_domains,
+                remove_target_adapter=True,
+                similarity_measure=NAME_MEASURE_MAPPING[similarity_measure_name],
+                softmax_temperature=tau_fixed,
+                top_k=top_k,
+                combination_type=combination_type,
+                vocab_embedding_method=vocab_embedding_method,
+                top_q=top_q_fixed,
+                top_q_frac=top_q_frac,
+                gamma=gamma_arg,
+                normalization_method=normalization_method,
+                uniform_weight_selected_adapters=True,
+            )
+            save_results(results, weights, output_dir=run_output_dir)
+
+            h = compute_hmean(results)
+            summary[run_name] = {
+                "gamma": gamma, "top_k": top_k,
+                "h_miou": h, "results": results,
+            }
+            print(f"ABLATION WEIGHTING (uniform): {run_name} => h-mIoU: {h}")
+
+    print(base_output_dir)
+    os.makedirs(base_output_dir, exist_ok=True)
+    with open(os.path.join(base_output_dir, "grid_summary.json"), "w") as f:
+        json.dump(summary, f, indent=4)
+
+    best_name = max(summary, key=lambda k: summary[k]["h_miou"])
+    best = summary[best_name]
+    print(f"\nABLATION BEST: {best_name}: h-mIoU: {best['h_miou']} "
+          f"(gamma: {best['gamma']}, K: {best['top_k']})")
+
 
 def parse_args():
     """Parse command line arguments."""
@@ -759,7 +848,8 @@ def parse_args():
                             "grid_norm_ablation",
                             "grid_distance_metric_ablation",
                             "grid_topq_frac_ablation",
-                            "grid_tau_k_sensitivity_ablation"
+                            "grid_tau_k_sensitivity_ablation",
+                            "grid_search_weighting_ablation"
                         ],
                         help="Type of experiment to run")
 
@@ -780,6 +870,8 @@ def parse_args():
 
     parser.add_argument("--normalize_centroids", action="store_true", default=True,
                         help="Normalize centroids")
+    parser.add_argument("--uniform_weight_selected_adapters", action="store_true", default=False,
+                        help="Normalize centroids")
     parser.add_argument("--no_normalize_centroids", dest="normalize_centroids", action="store_false",
                         help="Do not normalize centroids")
     parser.add_argument("--normalization_method", type=str,
@@ -796,6 +888,8 @@ def parse_args():
                         help="Number of initial random configration for BO")
     parser.add_argument("--bo_n_iter", type=int, default=25,
                         help="Number of BO iterations")
+    parser.add_argument("--bo_resume_state", type=str, default=None,
+                        help="Path to JSON file containing optimizer state for Bayessian Optimization")
 
     parser.add_argument("--top_q_frac", type=float, default=0.5,
                         help="Fixed value for the Top-Q-Fracture Value")
@@ -808,9 +902,6 @@ def parse_args():
                         help="Seed for the split")
     parser.add_argument("--eval_on_test", action="store_true",
                         help="if set to true, the test set is used for evaluation")
-
-    parser.add_argument("--bo_resume_state", type=str, default=None,
-                        help="Path to JSON file containing optimizer state for Bayessian Optimization")
 
     return parser.parse_args()
 
@@ -874,6 +965,7 @@ def main():
                                           use_val_portion=args.use_val_portion)
         semla_merge(target_domains, semla_config, args.remove_target_adapter,
                     args.output_dir, orchestrator,
+                    uniform_weight_selected_adapters=args.uniform_weight_selected_adapters,
                     vocab_embedding_method=voc_method,
                     normalization_method=norm_method)
 
@@ -976,6 +1068,22 @@ def main():
             val_test_split=args.val_test_split,
             val_test_seed=args.val_test_seed,
             use_val_portion=args.use_val_portion
+        )
+
+    elif args.experiment == "grid_search_weighting_ablation":
+        grid_search_weighting_ablation(
+            source_domains_path=args.source_domains,
+            target_domains_path=args.target_domains,
+            config=semla_config,
+            output_dir=args.output_dir,
+            vocab_embedding_method=voc_method,
+            normalization_method=norm_method,
+            normalize_centroids=args.normalize_centroids,
+            subset_fraction=args.subset_fraction,
+            subset_seed=args.subset_seed,
+            val_test_split=args.val_test_split,
+            val_test_seed=args.val_test_seed,
+            use_val_portion=args.use_val_portion,
         )
 
 if __name__ == "__main__":

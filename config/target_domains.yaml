@@ -1,5 +1,5 @@
-- pc59
 - mv
+- pc59
 - a133 # DONE# DONE sh run_lora.sh configs/mv/mv.yaml 1 output/mv/ MODEL.LORA.NAME mv
 - nyu
 - idd

@@ -1,7 +1,6 @@
-import hashlib
 import json
 import time
-from typing import Union, Dict, Callable, List, Tuple
+from typing import Union, Dict, Callable, List, Tuple, Sequence
 from typing import Any, Literal, Mapping
 from pathlib import Path
 from argparse import Namespace
@@ -639,7 +638,8 @@ class DomainOrchestrator:
         top_q: int = 5,
         gamma: float = 0.5,
         normalization_method: NormalizationMethod = NormalizationMethod.ZSCORE,
-        top_q_frac: float | None = None
+        top_q_frac: float | None = None,
+        uniform_weight_selected_adapters: bool = False
     ) -> tuple[dict[str, float], str, Dict[str, float], Dict[str, float], float]:
         """
         Merge the source domains and benchmark the merged adapter on the target domain.
@@ -748,8 +748,10 @@ class DomainOrchestrator:
                 print(f"{n}: {d}", end=", ")
             print("")
 
-            weights = self._calculate_adapter_weights(k_closest_similarities, softmax_temperature)
-            #weights = [1 / len(k_closest_names) for _ in k_closest_names]  # TEST: Gleichverteilung statt SemLA-Gewichte
+            if uniform_weight_selected_adapters:
+                weights = [1 / len(k_closest_names) for _ in k_closest_names]  # TEST: Gleichverteilung statt SemLA-Gewichte
+            else:
+                weights = self._calculate_adapter_weights(k_closest_similarities, softmax_temperature)
 
             domain_weight_mapping = {
                 k_closest_name: weight
@@ -921,6 +923,7 @@ class DomainOrchestrator:
         save_per_image_log: bool = False,
         normalization_method: NormalizationMethod = NormalizationMethod.ZSCORE,
         top_q_frac: float | None = None,
+        uniform_weight_selected_adapters: bool = False
     ) -> tuple[dict[str, float], dict[str, float], list[dict[str, float] | None]]:
 
         from detectron2.evaluation import inference_context, SemSegEvaluator
@@ -1021,7 +1024,8 @@ class DomainOrchestrator:
                         gamma=gamma,
                         top_q=top_q,
                         normalization_method=normalization_method,
-                        top_q_frac=top_q_frac
+                        top_q_frac=top_q_frac,
+                        uniform_weight_selected_adapters=uniform_weight_selected_adapters
                     )
 
                     # Zeiten zur Effizienzabschätzung
@@ -1134,12 +1138,12 @@ class DomainOrchestrator:
         softmax_temperature: float | None = 0.05,
         top_k: int = 5,
         combination_type: str = "cat",
-        similarity_measure: Callable = lambda v1, v2: 1 / np.linalg.norm(v1 - v2),
+        similarity_measure=lambda v1, v2: 1 / np.linalg.norm(v1 - v2),
         vocab_embedding_method: VocabEmbeddingMethod = VocabEmbeddingMethod.GLOBAL,
         gamma: float = 0.5,
         top_q: int = 5,
         normalization_method: NormalizationMethod = NormalizationMethod.ZSCORE,
-        top_q_frac: float | None = None,
+            top_q_frac: float = 0.5,
     ) -> None:
         from detectron2.evaluation import inference_context
         from contextlib import ExitStack
@@ -1152,6 +1156,7 @@ class DomainOrchestrator:
             self._set_current_target_domain(current_target_domain)
 
             gt_classnames = get_classnames_for_domain(current_target_domain_name)
+            gt_normalized = {_normalize_classname(c) for c in gt_classnames}
             data_loader = current_target_domain.data_loader
             model = self.current_model
 
@@ -1166,6 +1171,8 @@ class DomainOrchestrator:
                     if image_paths is not None and input_path not in image_paths:
                         continue  # Bild nicht in der handverlesenen Liste, dann überspringen
                     print(f"Predicting: {input_path}")
+
+                    gt_mask = inputs[0]["sem_seg"].numpy()
 
                     # Adapterauswahl (wie benchmark_semla)
                     embedding_norm, embedding_raw, patch_embedding = self.embedding_manager.embed_image(
@@ -1191,7 +1198,6 @@ class DomainOrchestrator:
                         top_q_frac=top_q_frac,
                     )
 
-
                     # Bei method=NONE: SemLA-Baseline-Segmentierung
                     # Bei method=PATCH/GLOBAL: Vokabular-Matching-Adapterauswahl, aber noch mit GT-Vokabular
                     selection_out = self.current_model(inputs)
@@ -1212,13 +1218,14 @@ class DomainOrchestrator:
                             detected_classes.append((result_objects[0].names[class_id], conf))
 
                         # im GT vorhandene Klassen rausfiltern
-                        detected_classes = [(name, conf) for name, conf in detected_classes if name not in gt_classnames]
+                        detected_classes = [(name, conf) for name, conf in detected_classes
+                                            if _normalize_classname(name) not in gt_normalized]
 
-                        # Sortieren nach confidence, top-x rausnehmen
+                        # Sortieren nach "confidence", top-x rausnehmen
                         detected_classes = sorted(detected_classes, key=lambda x: x[1], reverse=True)
                         top_classes = list(dict.fromkeys(name for name, _ in detected_classes))[:top_x]
 
-                        extended_classnames = list(gt_classnames) + top_classes
+                        extended_classnames = deduplicate_classes(gt_classnames, top_classes)
 
                         old_vocab = swap_class_vocabulary(self.current_model, extended_classnames)
                         extended_out = self.current_model(inputs)
@@ -1228,6 +1235,7 @@ class DomainOrchestrator:
                     # global / patch
                     elif vocab_embedding_method is not VocabEmbeddingMethod.NONE:
                         extended_classnames = list(gt_classnames)
+                        seen_normalized = {_normalize_classname(c) for c in extended_classnames}
                         query_embeddings = patch_embedding if patch_embedding is not None else [embedding_norm]
 
                         for adapter_name in weight_dict.keys():
@@ -1241,7 +1249,9 @@ class DomainOrchestrator:
                             top_idx = np.argsort(sims)[-top_x:]
                             for idx in top_idx:
                                 name = adapter_classnames[idx]
-                                if name not in extended_classnames:
+                                norm = _normalize_classname(name)
+                                if norm not in seen_normalized:
+                                    seen_normalized.add(norm)
                                     extended_classnames.append(name)
 
                         old_vocab = swap_class_vocabulary(self.current_model, extended_classnames)
@@ -1251,7 +1261,7 @@ class DomainOrchestrator:
 
                         # für none keine erweiterung des Klassenvokabulars
 
-                    save_qualitative_result(
+                    save_raw_masks(
                         image_path=input_path,
                         vocab_embedding_method=vocab_embedding_method.value,
                         selection_mask=selection_mask,
@@ -1260,6 +1270,7 @@ class DomainOrchestrator:
                         extended_classnames=extended_classnames,
                         adapter_weights=weight_dict,
                         output_dir=output_dir,
+                        gt_mask=gt_mask,
                     )
 
                     self.current_model.delete_adapter(merged_adapter_name)
@@ -1268,36 +1279,57 @@ class DomainOrchestrator:
 
             print(f"Vokabular-Erweiterung für '{current_target_domain_name}' für qualitative Segmentierungsbeispiele abgeschlossen.")
 
-def classname_to_color(name: str) -> tuple[int, int, int]:
+def deduplicate_classes(base_classnames: Sequence[str], candidates: Sequence[str]) -> List[str]:
+    # nimmt Klassenkandidaten nur an, wenn sie noch nicht in base_classnames (ursprüngliches Adaptevokabular) enthalten sind
+    seen = {_normalize_classname(c) for c in base_classnames}
+    result = list(base_classnames)
+    for name in candidates:
+        norm = _normalize_classname(name)
+        if norm not in seen:
+            seen.add(norm)
+            result.append(name)
+    return result
 
-    h = hashlib.md5(name.encode()).hexdigest()
-    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
 
-def colorize_mask(mask: np.ndarray, classnames: list[str]) -> np.ndarray:
-    h, w = mask.shape
-    rgb = np.zeros((h, w, 3), dtype=np.uint8)
-    for idx, name in enumerate(classnames):
-        color = classname_to_color(name)
-        rgb[mask == idx] = color
-    return rgb
-
-def save_qualitative_result(image_path, vocab_embedding_method, selection_mask, selection_classnames,
-                             extended_mask, extended_classnames, adapter_weights, output_dir):
+def save_raw_masks(image_path, vocab_embedding_method, selection_mask, selection_classnames,
+                   extended_mask, extended_classnames, adapter_weights, output_dir,
+                   gt_mask: np.ndarray | None = None,
+                   save_input_photo: bool = True):
+    # Speichert die rohen Index-Masken
     stem = Path(image_path).stem
     prefix = f"{stem}_{vocab_embedding_method}"
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    Image.open(image_path).save(f"{output_dir}/{stem}_input.png")
-    Image.fromarray(colorize_mask(selection_mask, selection_classnames)).save(f"{output_dir}/{prefix}_selection.png")
+    if save_input_photo:
+        Image.open(image_path).save(f"{output_dir}/{stem}_input.png")
+
+    def _save_index_mask(mask: np.ndarray, path: str) -> None:
+        Image.fromarray(mask.astype(np.uint16)).save(path)
+
+    _save_index_mask(selection_mask, f"{output_dir}/{prefix}_selection_mask.png")
 
     meta = {
         "adapter_weights": {k: float(v) for k, v in adapter_weights.items()},
         "selection_classnames": selection_classnames,
     }
+    meta_gt = meta
 
     if extended_mask is not None:
-        Image.fromarray(colorize_mask(extended_mask, extended_classnames)).save(f"{output_dir}/{prefix}_extended.png")
+        _save_index_mask(extended_mask, f"{output_dir}/{prefix}_extended_mask.png")
         meta["extended_classnames"] = extended_classnames
         meta["new_classes"] = [c for c in extended_classnames if c not in selection_classnames]
 
+    if gt_mask is not None:
+        # Speicher auch die GT-Maske für spätere Evaluierung
+        _save_index_mask(gt_mask, f"{output_dir}/../GT/{stem}_gt_mask.png")
+
     with open(f"{output_dir}/{prefix}_meta.json", "w") as f:
         json.dump(meta, f, indent=2)
+
+    with open(f"{output_dir}/../GT/{prefix}_meta.json", "w") as f:
+        json.dump(meta_gt, f, indent=2)
+
+def _normalize_classname(name: str) -> str:
+    # für Duplikat-Checks um Groß bzw Kleinschreibung und Whitespace ignorieren.
+    # Wichtig, da die Klassenvokabulare zwischen den Adaptern teilweise gleiche Klassen, mit leicht anderer Definition enthalten!
+    return name.strip().lower()

@@ -1,6 +1,10 @@
 """
-TODO Documentation!
+Registriert die vokabularübergreifenden Testdatensätze (IDD, NYU, PC59)  domänenfremden Klassen im DatasetCatalog von
+Detectron2, mit den zugehörigen Metadaten für den NovelSemSegEvaluator.
 """
+# Autor: Joshua Ritter
+# Teil der Masterarbeit "Vokabulargeleitete Selektion von LoRA-Adaptern
+# mittels CLIP für domänenadaptive Open-Vocabulary-Segmentierung" (2026)
 import os
 import logging
 
@@ -157,5 +161,5 @@ def register_novel_eval_datasets(root):
 
 
 _root = os.getenv("DETECTRON2_DATASETS", "datasets")
-register_novel_eval_datasets("/home/joshi/Desktop/HSB/SemLA_VocabularyGuided/catseg/datasets")
+register_novel_eval_datasets(_root)
 

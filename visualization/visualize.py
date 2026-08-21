@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Autor: Joshua Ritter
+# Teil der Masterarbeit "Vokabulargeleitete Selektion von LoRA-Adaptern
+# mittels CLIP für domänenadaptive Open-Vocabulary-Segmentierung" (2026)
 import argparse
 import json
 import os

@@ -2,7 +2,7 @@
 
 Dieses Repository enthält den Code zur gleichnamigen Masterarbeit. Die Arbeit baut auf SemLA [1] auf und untersucht, ob sich die dort vorgeschlagene, rein visuelle Adapterauswahl durch ein zusätzliches Vokabularsignal verbessern lässt.
 
-[Code](https://github.com/rezaqorbani/SemLA) | [Paper](https://doi.org/10.1109/CVPR52734.2025.00916)
+[SemLA-Code](https://github.com/rezaqorbani/SemLA) | [SemLA-Paper](https://doi.org/10.1109/CVPR52734.2025.00916)
 
 ## Kurzbeschreibung
 
@@ -119,6 +119,11 @@ python visualize.py --plot coverage-bins
 
 Die benötigten Pfade zu den `correlation_log.json`-Dateien werden am Kopf von `visualize.py` konfiguriert.
 Die `correlation_log.json`-Dateien werden im Zuge der Hauptexperimente im Ergebnisordner erstellt. Für die BO- und Ablationsexperimente werden diese Dateien nicht erstellt.
+
+# Lizenz
+## Lizenz
+
+Dieses Repository steht, wie die zugrundeliegende Arbeit SemLA [1], unter der Apache-2.0-Lizenz, siehe [LICENSE](LICENSE) für die Details. Einzelne Teile unterliegen abweichenden Lizenzbedingungen, die aus SemLA übernommen wurden: [CAT-Seg](https://github.com/cvlab-kaist/CAT-Seg) steht unter der MIT-Lizenz, einsehbar unter [catseg/LICENSE](catseg/LICENSE). Darüber hinaus werden einzelne Dateien aus [Detectron2](https://github.com/facebookresearch/detectron2) und [FC-CLIP](https://github.com/bytedance/fc-clip) (Apache-2.0-Lizenz) sowie aus [Mask2Former](https://github.com/facebookresearch/Mask2Former) (MIT-Lizenz) verwendet.
 
 # Quellen
 > [1] R. Qorbani, G. Villani, T. Panagiotakopoulos, M. B. Colomer, L. Härenstam-Nielsen, M. Segu, P. L. Dovesi, J. Karlgren, D. Cremers, F. Tombari, M. Poggi, "Semantic Library Adaptation: LoRA Retrieval and Fusion for Open-Vocabulary Semantic Segmentation," in *2025 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)*, 2025, S. 9804–9815, doi: 10.1109/CVPR52734.2025.00916.

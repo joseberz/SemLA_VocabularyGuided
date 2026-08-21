@@ -1,3 +1,8 @@
+# Geändert von Joshua Ritter, 2026, im Rahmen der Masterarbeit
+# "Vokabulargeleitete Selektion von LoRA-Adaptern
+# mittels CLIP für domänenadaptive Open-Vocabulary-Segmentierung"
+# Ursprüngliche Datei: SemLA (Qorbani et al.), Apache-2.0-Lizenz
+
 import json
 import time
 from typing import Union, Dict, Callable, List, Tuple, Sequence
@@ -68,6 +73,9 @@ def normalize_scores(x: np.ndarray, method: NormalizationMethod) -> np.ndarray:
 
 def compute_miou(pred_mask: np.ndarray, gt_mask: np.ndarray, domain_name: str) -> Tuple[float, Dict[int, float], List[int]]:
     """Calculate a per image mIoU for all present classes"""
+    # Autor: Joshua Ritter
+    # Teil der Masterarbeit "Vokabulargeleitete Selektion von LoRA-Adaptern
+    # mittels CLIP für domänenadaptive Open-Vocabulary-Segmentierung" (2026)
 
     # resize wenn nötig
     if pred_mask.shape != gt_mask.shape:
@@ -180,6 +188,9 @@ class DomainObserver:
         """
         Same variant as the baseline domain distance method, but incorporating the same normalization procedure.
         Is used in experiments to exclude normalization as a confounding factor."""
+        # Autor: Joshua Ritter
+        # Teil der Masterarbeit "Vokabulargeleitete Selektion von LoRA-Adaptern
+        # mittels CLIP für domänenadaptive Open-Vocabulary-Segmentierung" (2026)
         domain_names = []
         sem_sims = []
 
@@ -231,6 +242,9 @@ class DomainObserver:
         """
         Calculate the similarity between the target embedding and the domain prototypes.
         """
+        # Autor: Joshua Ritter
+        # Teil der Masterarbeit "Vokabulargeleitete Selektion von LoRA-Adaptern
+        # mittels CLIP für domänenadaptive Open-Vocabulary-Segmentierung" (2026)
         domain_names = []
         sem_sims = []
         voc_sims = []
@@ -312,6 +326,9 @@ class DomainObserver:
             top_q_frac: float | None = None,
             use_cosine: bool = True
     ) -> np.float64:
+        # Autor: Joshua Ritter
+        # Teil der Masterarbeit "Vokabulargeleitete Selektion von LoRA-Adaptern
+        # mittels CLIP für domänenadaptive Open-Vocabulary-Segmentierung" (2026)
         E = np.stack([e.squeeze() for e in embedding])
         V = np.stack([v.squeeze() for v in vocab_embeddings])
 
@@ -1145,6 +1162,10 @@ class DomainOrchestrator:
         normalization_method: NormalizationMethod = NormalizationMethod.ZSCORE,
             top_q_frac: float = 0.5,
     ) -> None:
+        # Autor: Joshua Ritter
+        # Teil der Masterarbeit "Vokabulargeleitete Selektion von LoRA-Adaptern
+        # mittels CLIP für domänenadaptive Open-Vocabulary-Segmentierung" (2026)
+        # Erlaubt die Erstellung von Segmentierungsmasken im Open-Vocabulary- sowie im Free-Vocabulary-Setting
         from detectron2.evaluation import inference_context
         from contextlib import ExitStack
         import scipy.spatial.distance as spdist

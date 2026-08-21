@@ -13,8 +13,12 @@ logger = logging.getLogger(__name__)
 
 class NovelSemSegEvaluator(SemSegEvaluator):
     """
-    TODO Doku
+    Erweitert den SemSegEvaluator um separat berechnete mIoU-Werte
+    für die Teilmenge domänenfremder Klassen (novel_ids), zusätzlich zu den Metriken über alle Klassen.
     """
+    # Autor: Joshua Ritter
+    # Teil der Masterarbeit "Vokabulargeleitete Selektion von LoRA-Adaptern
+    # mittels CLIP für domänenadaptive Open-Vocabulary-Segmentierung" (2026)
 
     def __init__(self, dataset_name, distributed=True, output_dir=None):
         super().__init__(

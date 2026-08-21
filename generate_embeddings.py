@@ -1,3 +1,8 @@
+# Geändert von Joshua Ritter, 2026, im Rahmen der Masterarbeit
+# "Vokabulargeleitete Selektion von LoRA-Adaptern
+# mittels CLIP für domänenadaptive Open-Vocabulary-Segmentierung"
+# Ursprüngliche Datei: SemLA (Qorbani et al.), Apache-2.0-Lizenz
+
 from pathlib import Path
 import os
 import yaml

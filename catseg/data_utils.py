@@ -1,3 +1,7 @@
+# Autor: Joshua Ritter
+# Teil der Masterarbeit "Vokabulargeleitete Selektion von LoRA-Adaptern
+# mittels CLIP für domänenadaptive Open-Vocabulary-Segmentierung" (2026)
+
 import random
 from typing import Union, List, Any, Callable, Dict, Optional, Tuple
 
@@ -15,7 +19,11 @@ def register_subset_dataset(
         subset_seed: int = 42,
 ) -> str:
     """
-    TODO DOKU
+    Registriert eine Teilmenge eines bereits registrierten
+    Datasets unter neuem Namen im DatasetCatalog.
+
+    Bei subset_fraction >= 1.0 wird keine Teilmenge gebildet und stattdessen
+    wird der ursprüngliche Datasetname unverändert zurückgegeben.
     """
     if subset_fraction >= 1.0:
         return dataset_name  # kein Subset
@@ -59,7 +67,9 @@ def register_val_test_split(
         split_seed: int = 123,
 ) -> Tuple[str, str]:
     """
-    TODO DOKU
+    Teilt ein bereits registriertes Dataset anhand eines Seeds in eine
+    Validierungs und eine Testmenge auf und registriert beide unter
+    neuem Namen im DatasetCatalog.
     """
     assert 0.0 < val_fraction < 1.0, (
         f"val_fraction muss zwischen 0 und 1 liegen, ist aber {val_fraction}"

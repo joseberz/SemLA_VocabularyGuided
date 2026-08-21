@@ -1,3 +1,7 @@
+# Autor: Joshua Ritter
+# Teil der Masterarbeit "Vokabulargeleitete Selektion von LoRA-Adaptern
+# mittels CLIP für domänenadaptive Open-Vocabulary-Segmentierung" (2026)
+
 import logging
 
 import numpy as np

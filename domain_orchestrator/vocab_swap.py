@@ -1,3 +1,8 @@
+# Autor: Joshua Ritter
+# Teil der Masterarbeit "Vokabulargeleitete Selektion von LoRA-Adaptern
+# mittels CLIP für domänenadaptive Open-Vocabulary-Segmentierung" (2026)
+# Dient dem dynamischen Austauschen des CAT-Seg Vokabulars
+
 from typing import List
 from cat_seg.modeling.transformer.cat_seg_predictor import CATSegPredictor
 

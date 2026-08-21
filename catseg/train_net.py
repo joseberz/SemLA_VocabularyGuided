@@ -656,6 +656,10 @@ class ResizedCityscapesSemSegEvaluator(CityscapesSemSegEvaluator):
         return ret
 
 class AccumSimpleTrainer(SimpleTrainer):
+    # Autor: Joshua Ritter
+    # Teil der Masterarbeit "Vokabulargeleitete Selektion von LoRA-Adaptern
+    # mittels CLIP für domänenadaptive Open-Vocabulary-Segmentierung" (2026)
+    # Überschreibt SimpleTrainer, um die Accumulation-Strategie für die Gradienten-Akkumulation zu implementieren
     def __init__(self, model, data_loader, optimizer, accum_steps: int = 1,
                  zero_grad_before_forward: bool = False, async_write_metrics: bool = False):
         super().__init__(model, data_loader, optimizer,

@@ -1,3 +1,8 @@
+# Geändert von Joshua Ritter, 2026, im Rahmen der Masterarbeit
+# "Vokabulargeleitete Selektion von LoRA-Adaptern
+# mittels CLIP für domänenadaptive Open-Vocabulary-Segmentierung"
+# Ursprüngliche Datei: SemLA (Qorbani et al.), Apache-2.0-Lizenz
+
 import argparse
 import json
 import os
@@ -189,6 +194,9 @@ def bo_optimize(
         n_iter: int = 25,
         resume_from_state: str | None = None,
 ) -> None:
+    # Autor: Joshua Ritter
+    # Teil der Masterarbeit "Vokabulargeleitete Selektion von LoRA-Adaptern
+    # mittels CLIP für domänenadaptive Open-Vocabulary-Segmentierung" (2026)
     root_dir = os.path.abspath(os.path.dirname(__file__))
     base_output_dir = os.path.join(root_dir, output_dir, f"bo_{vocab_embedding_method.value}")
     os.makedirs(base_output_dir, exist_ok=True)
@@ -208,13 +216,11 @@ def bo_optimize(
         use_val_portion=use_val_portion,
     )
 
-    # TODO
     if vocab_embedding_method is VocabEmbeddingMethod.NONE:
         pbounds = {
             "top_k_opt": (5, 12),
             "temperature_opt": (0.05, 0.5)
         }
-        # TODO
         points_to_probe = [
             {'top_k_opt': 5.0, 'temperature_opt': 0.05},
             {'top_k_opt': 5.0, 'temperature_opt': 0.1},
@@ -342,6 +348,9 @@ def grid_search_centroid_ablation(
         val_test_seed: int = 123,
         use_val_portion: bool = True,
 ) -> None:
+    # Autor: Joshua Ritter
+    # Teil der Masterarbeit "Vokabulargeleitete Selektion von LoRA-Adaptern
+    # mittels CLIP für domänenadaptive Open-Vocabulary-Segmentierung" (2026)
     source_domains = load_domains_from_yaml(source_domains_path)
     target_domains = load_domains_from_yaml(target_domains_path)
     similarity_measure_name = config.get("similarity_measure_name", "euclidean")
@@ -412,6 +421,9 @@ def grid_search_normalization_ablation(
         val_test_seed: int = 123,
         use_val_portion: bool = True,
 ) -> None:
+    # Autor: Joshua Ritter
+    # Teil der Masterarbeit "Vokabulargeleitete Selektion von LoRA-Adaptern
+    # mittels CLIP für domänenadaptive Open-Vocabulary-Segmentierung" (2026)
     if vocab_embedding_method is VocabEmbeddingMethod.NONE:
         raise ValueError(
             "Ablation experiment is not applicable for NONE method"
@@ -498,6 +510,9 @@ def grid_search_distance_metric_ablation(
         val_test_seed: int = 123,
         use_val_portion: bool = True,
 ) -> None:
+    # Autor: Joshua Ritter
+    # Teil der Masterarbeit "Vokabulargeleitete Selektion von LoRA-Adaptern
+    # mittels CLIP für domänenadaptive Open-Vocabulary-Segmentierung" (2026)
     if vocab_embedding_method is VocabEmbeddingMethod.NONE:
         raise ValueError(
             "Ablation experiment is not applicable for NONE method"
@@ -579,6 +594,9 @@ def grid_search_topq_ablation(
         val_test_seed: int = 123,
         use_val_portion: bool = True,
 ) -> None:
+    # Autor: Joshua Ritter
+    # Teil der Masterarbeit "Vokabulargeleitete Selektion von LoRA-Adaptern
+    # mittels CLIP für domänenadaptive Open-Vocabulary-Segmentierung" (2026)
     if vocab_embedding_method is VocabEmbeddingMethod.NONE:
         raise ValueError("Ablation experiment is not applicable for NONE method")
 
@@ -674,6 +692,9 @@ def grid_search_tau_k_sensitivity(
         val_test_seed: int = 123,
         use_val_portion: bool = True,
 ) -> None:
+    # Autor: Joshua Ritter
+    # Teil der Masterarbeit "Vokabulargeleitete Selektion von LoRA-Adaptern
+    # mittels CLIP für domänenadaptive Open-Vocabulary-Segmentierung" (2026)
     if vocab_embedding_method is VocabEmbeddingMethod.NONE:
         raise ValueError("Ablation experiment is not applicable for NONE method")
 
@@ -762,6 +783,9 @@ def grid_search_weighting_ablation(
         use_val_portion: bool = True,
 ) -> None:
     """Ablation: uniforme Gewichtung statt Softmax"""
+    # Autor: Joshua Ritter
+    # Teil der Masterarbeit "Vokabulargeleitete Selektion von LoRA-Adaptern
+    # mittels CLIP für domänenadaptive Open-Vocabulary-Segmentierung" (2026)
     root_dir = os.path.abspath(os.path.dirname(__file__))
 
     source_domains = load_domains_from_yaml(source_domains_path)

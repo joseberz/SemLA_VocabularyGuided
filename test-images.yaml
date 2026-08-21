@@ -1,0 +1,33 @@
+# Positiv beispiele
+- datasets/coco/val2017/000000009448.jpg
+- datasets/coco/val2017/000000080022.jpg
+- datasets/coco/val2017/000000071451.jpg
+- datasets/nyudv2/rgb/000734.png
+- datasets/nyudv2/rgb/000857.png
+- datasets/coco/val2017/000000024243.jpg
+- datasets/pascal_ctx_d2/images/validation/2008_002597.jpg
+- datasets/coco/val2017/000000003501.jpg
+- datasets/ADE133_ignore_thre_0_1/images/validation/ADE_val_00000235.jpg
+- datasets/nyudv2/rgb/000448.png
+- datasets/nyudv2/rgb/001053.png
+- datasets/coco/val2017/000000040036.jpg
+
+# Domänenübergreifend / thematisch relevant:
+- datasets/nyudv2/rgb/000570.png
+- datasets/pascal_ctx_d2/images/validation/2008_003658.jpg
+- datasets/pascal_ctx_d2/images/validation/2008_002597.jpg
+- datasets/ADE133_ignore_thre_0_1/images/validation/ADE_val_00000235.jpg
+
+# Negativbeispiele
+- datasets/pascal_ctx_d2/images/validation/2008_001428.jpg
+- datasets/ADE133_ignore_thre_0_1/images/validation/ADE_val_00000283.jpg
+- datasets/coco/val2017/000000064499.jpg
+- datasets/nyudv2/rgb/001250.png #fehlt noch
+- /datasets/IDD_Segmentation/leftImg8bit/val/518/0004722_leftImg8bit.jpg
+- /datasets/IDD_Segmentation/leftImg8bit/val/319/frame1718_leftImg8bit.jpg
+- /datasets/IDD_Segmentation/leftImg8bit/val/147/764606_leftImg8bit.png
+- datasets/pascal_ctx_d2/images/validation/2008_003885.jpg
+- datasets/pascal_ctx_d2/images/validation/2008_002321.jpg
+- datasets/coco/val2017/000000064499.jpg
+- datasets/pascal_ctx_d2/images/validation/2008_001544.jpg
+- datasets/coco/val2017/000000026941.jpg

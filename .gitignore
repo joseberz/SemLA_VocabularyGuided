@@ -7,6 +7,5 @@ catseg/output/
 catseg/models/
 catseg/datasets/
 visualization/plots/
-results*/
-
-cross_vocab_dataset/cross_vocab_dataset_*
+#results*/
+plots/
